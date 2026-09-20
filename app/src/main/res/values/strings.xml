@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mass Patcher</string>
+    <string name="select_apk">Selecionar APK</string>
+    <string name="patch_apk">Patchar APK</string>
+    <string name="open_patched">Abrir APK Patcheado</string>
+    <string name="patch_name_hint">Nome do patch</string>
+</resources>
