@@ -14,12 +14,12 @@
         android:elevation="4dp">
 
         <TextView
+            android:id="@+id/btnBack"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="‹  "
+            android:text="&lt; "
             android:textColor="@color/accent_green"
-            android:textSize="22sp"
-            android:onClick="onBackPressed" />
+            android:textSize="22sp" />
 
         <TextView
             android:id="@+id/tvAppName"
@@ -44,7 +44,7 @@
             android:padding="16dp">
 
             <TextView
-                android:text="IAP DETECTADO"
+                android:text="ANALISE DO APP"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:textColor="@color/accent_green"
@@ -54,7 +54,7 @@
                 android:layout_marginBottom="6dp" />
 
             <TextView
-                android:id="@+id/tvIapInfo"
+                android:id="@+id/tvScanResult"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:background="@color/bg_card"
@@ -62,13 +62,76 @@
                 android:textColor="@color/text_primary"
                 android:textSize="12sp"
                 android:fontFamily="monospace"
-                android:text="Analisando..." />
+                android:text="Escaneando..." />
 
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/divider"
-                android:layout_marginVertical="16dp" />
+                android:layout_marginVertical="12dp" />
+
+            <TextView
+                android:text="OPCOES DE PATCH"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/accent_green"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.15"
+                android:layout_marginBottom="8dp" />
+
+            <CheckBox
+                android:id="@+id/cbIAP"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bypass de compras in-app (IAP)"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:buttonTint="@color/accent_green"
+                android:checked="true"
+                android:paddingStart="8dp"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cbAds"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Remocao de anuncios"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:buttonTint="@color/accent_green"
+                android:checked="true"
+                android:paddingStart="8dp"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cbLicense"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bypass de verificacao de licenca"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:buttonTint="@color/accent_green"
+                android:checked="true"
+                android:paddingStart="8dp"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cbProtection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bypass de protecoes anti-patcher"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:buttonTint="@color/accent_green"
+                android:checked="true"
+                android:paddingStart="8dp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider"
+                android:layout_marginVertical="12dp" />
 
             <TextView
                 android:text="LOG DO PATCH"
@@ -83,7 +146,7 @@
             <ScrollView
                 android:id="@+id/scrollLog"
                 android:layout_width="match_parent"
-                android:layout_height="240dp"
+                android:layout_height="220dp"
                 android:background="@color/bg_card">
 
                 <TextView
@@ -128,28 +191,40 @@
             android:textStyle="bold"
             android:backgroundTint="@color/accent_green" />
 
-        <Button
-            android:id="@+id/btnInstall"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:text="INSTALAR APK PATCHADO"
-            android:textColor="@color/accent_green"
-            android:textStyle="bold"
-            android:backgroundTint="@color/bg_card"
-            android:visibility="gone" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="8dp">
 
-        <Button
-            android:id="@+id/btnUninstall"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:text="DESINSTALAR ORIGINAL"
-            android:textColor="#FF4444"
-            android:textStyle="bold"
-            android:backgroundTint="@color/bg_card"
-            android:visibility="gone" />
+            <Button
+                android:id="@+id/btnInstall"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="INSTALAR"
+                android:textColor="@color/accent_green"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:backgroundTint="@color/bg_card"
+                android:visibility="gone" />
 
+            <View
+                android:layout_width="8dp"
+                android:layout_height="0dp" />
+
+            <Button
+                android:id="@+id/btnUninstall"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="DESINSTALAR"
+                android:textColor="#FF4444"
+                android:textStyle="bold"
+                android:textSize="13sp"
+                android:backgroundTint="@color/bg_card"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
 
 </LinearLayout>

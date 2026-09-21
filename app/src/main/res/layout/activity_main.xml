@@ -7,55 +7,75 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="56dp"
+        android:layout_height="wrap_content"
         android:background="@color/bg_header"
-        android:gravity="center_vertical"
+        android:orientation="vertical"
         android:paddingHorizontal="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="12dp"
         android:elevation="4dp">
 
-        <TextView
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Theo Patcher"
-            android:textColor="@color/accent_green"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:fontFamily="monospace" />
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="THEO PATCHER"
+                android:textColor="@color/accent_green"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/tvVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="v0.1 Mini Pro Era"
+                android:textColor="@color/accent_green"
+                android:textSize="10sp"
+                android:fontFamily="monospace"
+                android:background="@color/bg_card"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="3dp" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="..."
+            android:text="Carregando..."
             android:textColor="@color/text_secondary"
-            android:textSize="11sp" />
+            android:textSize="11sp"
+            android:layout_marginTop="4dp" />
     </LinearLayout>
 
     <Button
         android:id="@+id/btnPickApk"
         android:layout_width="match_parent"
-        android:layout_height="52dp"
+        android:layout_height="44dp"
         android:layout_marginHorizontal="16dp"
         android:layout_marginTop="12dp"
-        android:layout_marginBottom="4dp"
         android:text="SELECIONAR APK DO ARMAZENAMENTO"
         android:textColor="#000000"
-        android:textStyle="bold"
         android:textSize="13sp"
+        android:textStyle="bold"
         android:backgroundTint="@color/accent_green" />
 
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="4dp"
-        android:text="OU ESCOLHA UM APP INSTALADO:"
+        android:text="OU ESCOLHA UM APP INSTALADO"
         android:textColor="@color/text_secondary"
         android:textSize="10sp"
         android:textStyle="bold"
-        android:letterSpacing="0.15" />
+        android:gravity="center"
+        android:letterSpacing="0.2"
+        android:paddingVertical="8dp" />
 
     <EditText
         android:id="@+id/etSearch"
@@ -84,6 +104,7 @@
             style="@android:style/Widget.ProgressBar.Horizontal"
             android:layout_width="200dp"
             android:layout_height="8dp"
+            android:indeterminate="true"
             android:progressTint="@color/accent_green"
             android:progressBackgroundTint="@color/bg_card" />
 
@@ -92,7 +113,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Escaneando apps..."
+            android:text="Carregando apps..."
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />
     </LinearLayout>
