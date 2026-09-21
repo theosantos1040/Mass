@@ -2,8 +2,11 @@ name: Build & Release APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, claude/vanta-protocol-0fc793 ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -51,18 +54,19 @@ jobs:
         with:
           name: TheoPatcher-APK
           path: artifacts/TheoPatcher.apk
-          retention-days: 90
+          retention-days: 30
 
       - name: Create Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: "Theo Patcher v${{ github.run_number }}"
           body: |
-            ## Theo Patcher v${{ github.run_number }}
+            ## Theo Patcher
             APK patcher com detecção e bypass de IAP.
 
-            **Baixar:** `TheoPatcher.apk` abaixo ↓
+            **Download:** `TheoPatcher.apk` abaixo
           files: artifacts/TheoPatcher.apk
           draft: false
           prerelease: false
