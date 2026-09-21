@@ -2,7 +2,7 @@ name: Build & Release APK
 
 on:
   push:
-    branches: [ main, master, claude/vanta-protocol-0fc793 ]
+    branches: [ main, master, claude/vanta-protocol-0fc793, claude/vanta-build ]
   workflow_dispatch:
 
 permissions:
@@ -64,7 +64,7 @@ jobs:
           name: "Theo Patcher v${{ github.run_number }}"
           body: |
             ## Theo Patcher
-            APK patcher com detecção e bypass de IAP.
+            APK patcher com deteccao e bypass de IAP.
 
             **Download:** `TheoPatcher.apk` abaixo
           files: artifacts/TheoPatcher.apk

@@ -3,7 +3,11 @@ package com.theo.patcher.patcher
 import android.content.Context
 import android.util.Base64
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.security.*
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
@@ -17,6 +21,7 @@ object ApkSigner {
         val mat = getOrCreateSigningMaterial(context)
         val signedApk = File(unsignedApk.parent, "signed_${unsignedApk.name}")
         v1Sign(unsignedApk, signedApk, mat)
+        v2Sign(signedApk, mat)
         return signedApk
     }
 
@@ -54,7 +59,7 @@ object ApkSigner {
         return SigningMaterial(kp.private, cert, certDer)
     }
 
-    // --- v1 JAR signing ---
+    // ========================= v1 JAR signing =========================
 
     private fun v1Sign(input: File, output: File, mat: SigningMaterial) {
         val entries = linkedMapOf<String, ByteArray>()
@@ -139,7 +144,182 @@ object ApkSigner {
         return sb.toString()
     }
 
-    // --- PKCS#7 SignedData for .RSA ---
+    // ========================= v2 APK Signature Scheme =========================
+
+    private const val APK_SIG_SCHEME_V2_ID = 0x7109871a
+    private const val CHUNK_SIZE = 1048576
+
+    private fun v2Sign(apk: File, mat: SigningMaterial) {
+        val raf = RandomAccessFile(apk, "rw")
+        try {
+            val fileSize = raf.length().toInt()
+
+            val eocdOffset = findEocd(raf) ?: throw RuntimeException("EOCD not found")
+            raf.seek(eocdOffset.toLong() + 16)
+            val cdOffset = readUint32Le(raf)
+
+            val beforeCd = ByteArray(cdOffset)
+            raf.seek(0)
+            raf.readFully(beforeCd)
+
+            val cdAndEocd = ByteArray(fileSize - cdOffset)
+            raf.seek(cdOffset.toLong())
+            raf.readFully(cdAndEocd)
+
+            val cd = ByteArray(eocdOffset - cdOffset)
+            System.arraycopy(cdAndEocd, 0, cd, 0, cd.size)
+            val eocd = ByteArray(fileSize - eocdOffset)
+            System.arraycopy(cdAndEocd, cd.size, eocd, 0, eocd.size)
+
+            val topDigest = computeApkDigest(beforeCd, cd, eocd)
+
+            val signedData = buildV2SignedData(topDigest, mat.certDer)
+            val signedDataBytes = lengthPrefixed(signedData)
+
+            val sig = Signature.getInstance("SHA256withRSA")
+            sig.initSign(mat.privateKey)
+            sig.update(signedData)
+            val signature = sig.sign()
+
+            val sigEntry = buildSignatureEntry(signature)
+            val publicKeyDer = mat.certificate.publicKey.encoded
+
+            val signer = lengthPrefixed(
+                concat(signedDataBytes, lengthPrefixed(sigEntry), lengthPrefixed(publicKeyDer))
+            )
+            val v2Value = lengthPrefixed(signer)
+
+            val sigBlock = buildApkSigningBlock(v2Value)
+
+            val newEocd = eocd.copyOf()
+            val newCdOffset = cdOffset + sigBlock.size
+            putUint32Le(newEocd, 16, newCdOffset)
+
+            raf.seek(cdOffset.toLong())
+            raf.write(sigBlock)
+            raf.write(cd)
+            raf.write(newEocd)
+            raf.setLength(cdOffset.toLong() + sigBlock.size + cd.size + newEocd.size)
+        } finally {
+            raf.close()
+        }
+    }
+
+    private fun computeApkDigest(beforeCd: ByteArray, cd: ByteArray, eocd: ByteArray): ByteArray {
+        val sections = listOf(beforeCd, cd, eocd)
+        val chunkDigests = mutableListOf<ByteArray>()
+        val md = MessageDigest.getInstance("SHA-256")
+
+        for (section in sections) {
+            var offset = 0
+            while (offset < section.size) {
+                val chunkLen = minOf(CHUNK_SIZE, section.size - offset)
+                md.reset()
+                md.update(byteArrayOf(0xa5.toByte()))
+                md.update(uint32LeBytes(chunkLen))
+                md.update(section, offset, chunkLen)
+                chunkDigests += md.digest()
+                offset += chunkLen
+            }
+        }
+
+        md.reset()
+        md.update(byteArrayOf(0x5a))
+        md.update(uint32LeBytes(chunkDigests.size))
+        for (d in chunkDigests) md.update(d)
+        return md.digest()
+    }
+
+    private fun buildV2SignedData(digest: ByteArray, certDer: ByteArray): ByteArray {
+        val digestEntry = ByteBuffer.allocate(8 + digest.size).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(4 + digest.size)
+            .putInt(0x0103)
+            .put(lengthPrefixed(digest))
+        val digests = lengthPrefixed(digestEntry.array())
+        val certs = lengthPrefixed(lengthPrefixed(certDer))
+        return concat(digests, certs)
+    }
+
+    private fun buildSignatureEntry(signature: ByteArray): ByteArray {
+        val buf = ByteBuffer.allocate(4 + 4 + signature.size).order(ByteOrder.LITTLE_ENDIAN)
+            .putInt(4 + signature.size)
+            .putInt(0x0103)
+            .put(signature)
+        return buf.array()
+    }
+
+    private fun buildApkSigningBlock(v2Value: ByteArray): ByteArray {
+        val pairSize = 4L + v2Value.size
+        val payloadSize = 8L + pairSize
+        val blockSize = payloadSize + 8 + 16
+
+        val buf = ByteBuffer.allocate((8 + payloadSize + 8 + 16).toInt()).order(ByteOrder.LITTLE_ENDIAN)
+        buf.putLong(blockSize)
+        buf.putLong(pairSize)
+        buf.putInt(APK_SIG_SCHEME_V2_ID)
+        buf.put(v2Value)
+        buf.putLong(blockSize)
+        buf.put("APK Sig Block 42".toByteArray(Charsets.US_ASCII))
+        return buf.array()
+    }
+
+    private fun findEocd(raf: RandomAccessFile): Int? {
+        val fileSize = raf.length().toInt()
+        val searchStart = maxOf(0, fileSize - 65557)
+        val buf = ByteArray(fileSize - searchStart)
+        raf.seek(searchStart.toLong())
+        raf.readFully(buf)
+
+        for (i in buf.size - 22 downTo 0) {
+            if (buf[i] == 0x50.toByte() && buf[i + 1] == 0x4b.toByte() &&
+                buf[i + 2] == 0x05.toByte() && buf[i + 3] == 0x06.toByte()
+            ) {
+                return searchStart + i
+            }
+        }
+        return null
+    }
+
+    private fun readUint32Le(raf: RandomAccessFile): Int {
+        val b = ByteArray(4)
+        raf.readFully(b)
+        return (b[0].toInt() and 0xFF) or
+               ((b[1].toInt() and 0xFF) shl 8) or
+               ((b[2].toInt() and 0xFF) shl 16) or
+               ((b[3].toInt() and 0xFF) shl 24)
+    }
+
+    private fun uint32LeBytes(v: Int): ByteArray =
+        byteArrayOf(
+            (v and 0xFF).toByte(),
+            ((v shr 8) and 0xFF).toByte(),
+            ((v shr 16) and 0xFF).toByte(),
+            ((v shr 24) and 0xFF).toByte()
+        )
+
+    private fun putUint32Le(buf: ByteArray, offset: Int, value: Int) {
+        buf[offset]     = (value and 0xFF).toByte()
+        buf[offset + 1] = ((value shr 8) and 0xFF).toByte()
+        buf[offset + 2] = ((value shr 16) and 0xFF).toByte()
+        buf[offset + 3] = ((value shr 24) and 0xFF).toByte()
+    }
+
+    private fun lengthPrefixed(data: ByteArray): ByteArray {
+        val buf = ByteBuffer.allocate(4 + data.size).order(ByteOrder.LITTLE_ENDIAN)
+        buf.putInt(data.size)
+        buf.put(data)
+        return buf.array()
+    }
+
+    private fun concat(vararg parts: ByteArray): ByteArray {
+        val total = parts.sumOf { it.size }
+        val r = ByteArray(total)
+        var off = 0
+        for (p in parts) { p.copyInto(r, off); off += p.size }
+        return r
+    }
+
+    // ========================= PKCS#7 SignedData =========================
 
     private fun buildPkcs7(certDer: ByteArray, cert: X509Certificate, signature: ByteArray): ByteArray {
         val issuerDer = cert.issuerX500Principal.encoded
@@ -148,36 +328,36 @@ object ApkSigner {
         val encAlg = seq(oid(OID_RSA), DER_NULL)
 
         val signerInfo = seq(
-            int(byteArrayOf(1)),
-            seq(issuerDer, int(serialDer)),
+            derInt(byteArrayOf(1)),
+            seq(issuerDer, derInt(serialDer)),
             digestAlg,
             encAlg,
             oct(signature)
         )
 
         val signedData = seq(
-            int(byteArrayOf(1)),
-            set(digestAlg),
+            derInt(byteArrayOf(1)),
+            derSet(digestAlg),
             seq(oid(OID_DATA)),
             ctx(0, certDer),
-            set(signerInfo)
+            derSet(signerInfo)
         )
 
         return seq(oid(OID_SIGNED_DATA), ctx(0, signedData))
     }
 
-    // --- Self-signed X.509 certificate (raw DER) ---
+    // ========================= Self-signed X.509 (raw DER) =========================
 
     private fun buildSelfSignedCert(kp: KeyPair): ByteArray {
-        val cn = seq(set(seq(oid(OID_CN), utf8("TheoPatcher"))))
+        val cn = seq(derSet(seq(oid(OID_CN), utf8("TheoPatcher"))))
         val now = Date()
         val exp = Date(now.time + 10L * 365 * 86400000)
         val validity = seq(utcTime(now), utcTime(exp))
         val algId = seq(oid(OID_SHA256_RSA), DER_NULL)
 
         val tbs = seq(
-            ctx(0, int(byteArrayOf(2))),
-            int(byteArrayOf(1)),
+            ctx(0, derInt(byteArrayOf(2))),
+            derInt(byteArrayOf(1)),
             algId,
             cn,
             validity,
@@ -192,7 +372,7 @@ object ApkSigner {
         return seq(tbs, algId, bitStr(sig.sign()))
     }
 
-    // --- DER encoding primitives ---
+    // ========================= DER primitives =========================
 
     private val OID_SHA256_RSA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B)
     private val OID_RSA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01)
@@ -229,8 +409,8 @@ object ApkSigner {
     }
 
     private fun seq(vararg parts: ByteArray): ByteArray = tlv(0x30, cat(*parts))
-    private fun set(vararg parts: ByteArray): ByteArray = tlv(0x31, cat(*parts))
-    private fun int(v: ByteArray): ByteArray {
+    private fun derSet(vararg parts: ByteArray): ByteArray = tlv(0x31, cat(*parts))
+    private fun derInt(v: ByteArray): ByteArray {
         val padded = if (v.isNotEmpty() && v[0] < 0) byteArrayOf(0) + v else v
         return tlv(0x02, padded)
     }

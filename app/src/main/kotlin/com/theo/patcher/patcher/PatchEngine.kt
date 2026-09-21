@@ -18,7 +18,8 @@ object PatchEngine {
         val patchIAP: Boolean = true,
         val patchAds: Boolean = true,
         val patchLicense: Boolean = true,
-        val patchProtection: Boolean = true
+        val patchProtection: Boolean = true,
+        val patchBilling: Boolean = true
     )
 
     suspend fun patch(
@@ -33,11 +34,11 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.1 Mini Pro Era")
+        emit("  THEO PATCHER v0.2 — Full Bypass")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
-        emit("Opcoes: IAP=${options.patchIAP} Ads=${options.patchAds} License=${options.patchLicense} Protection=${options.patchProtection}")
+        emit("Opcoes: IAP=${options.patchIAP} Ads=${options.patchAds} License=${options.patchLicense} Protection=${options.patchProtection} Billing=${options.patchBilling}")
 
         try {
             val sourceApk = File(app.apkPath)
@@ -45,7 +46,7 @@ object PatchEngine {
                 it.deleteRecursively(); it.mkdirs()
             }
 
-            emit("\n[1/7] Escaneando padroes...")
+            emit("\n[1/8] Escaneando padroes...")
             val purchases = if (app.detectedPurchases.isNotEmpty()) app.detectedPurchases else IAPDetector.detect(sourceApk)
             val ads = if (app.detectedAds.isNotEmpty()) app.detectedAds else AdDetector.detect(sourceApk)
             val license = app.detectedLicense ?: LicenseDetector.detect(sourceApk)
@@ -70,7 +71,7 @@ object PatchEngine {
                     var totalPatched = 0
 
                     if (options.patchIAP) {
-                        emit("\n[2/7] Patching DEX - IAP bypass (${entry.name})...")
+                        emit("\n[2/8] Patching DEX - IAP bypass (${entry.name})...")
                         val (patched, report) = DexPatcher.patch(dexBytes, purchases)
                         if (report.bytesModified > 0) {
                             dexBytes = patched
@@ -83,8 +84,22 @@ object PatchEngine {
                         }
                     }
 
+                    if (options.patchBilling) {
+                        emit("\n[3/8] Patching DEX - billing bypass (${entry.name})...")
+                        val (patched, report) = BillingPatcher.patch(dexBytes)
+                        if (report.bytesModified > 0) {
+                            dexBytes = patched
+                            totalPatched += report.bytesModified
+                            emit("  + ${entry.name} Billing: ${report.patchedMethods.size} metodo(s)")
+                            report.patchedMethods.forEach { m -> emit("    - $m") }
+                            appliedStrategies += "Billing:${entry.name}"
+                        } else {
+                            emit("  ~ ${entry.name}: sem padroes Billing")
+                        }
+                    }
+
                     if (options.patchAds && ads.isNotEmpty()) {
-                        emit("\n[3/7] Patching DEX - remocao de anuncios (${entry.name})...")
+                        emit("\n[4/8] Patching DEX - remocao de anuncios (${entry.name})...")
                         val (patched, report) = AdPatcher.patch(dexBytes)
                         if (report.bytesModified > 0) {
                             dexBytes = patched
@@ -98,7 +113,7 @@ object PatchEngine {
                     }
 
                     if (options.patchLicense && license != null) {
-                        emit("\n[4/7] Patching DEX - bypass de licenca (${entry.name})...")
+                        emit("\n[5/8] Patching DEX - bypass de licenca (${entry.name})...")
                         val (patched, report) = LicensePatcher.patch(dexBytes)
                         if (report.bytesModified > 0) {
                             dexBytes = patched
@@ -112,7 +127,7 @@ object PatchEngine {
                     }
 
                     if (options.patchProtection && protections.isNotEmpty()) {
-                        emit("\n[5/7] Patching DEX - bypass de protecao (${entry.name})...")
+                        emit("\n[6/8] Patching DEX - bypass de protecao (${entry.name})...")
                         val (patched, report) = ProtectionPatcher.patch(dexBytes)
                         if (report.bytesModified > 0) {
                             dexBytes = patched
@@ -130,7 +145,7 @@ object PatchEngine {
                     }
                 }
 
-                emit("\n[6/7] Patching AndroidManifest.xml...")
+                emit("\n[7/8] Patching AndroidManifest.xml...")
                 val manifestEntry = zip.getEntry("AndroidManifest.xml")
                 if (manifestEntry != null) {
                     val original = zip.getInputStream(manifestEntry).readBytes()
@@ -145,7 +160,7 @@ object PatchEngine {
                 }
             }
 
-            emit("\n[7/7] Rebuild + Assinatura...")
+            emit("\n[8/8] Rebuild + Assinatura (v1+v2)...")
             val rebuiltApk = File(workDir, "rebuilt.apk")
             ApkBuilder.rebuild(sourceApk, rebuiltApk, patchedEntries)
             emit("  + APK rebuilt: ${rebuiltApk.length() / 1024} KB")
@@ -153,8 +168,8 @@ object PatchEngine {
 
             val signedApk = try {
                 val s = ApkSigner.sign(rebuiltApk, context)
-                emit("  + Assinado: ${s.name}")
-                appliedStrategies += "Sign"
+                emit("  + Assinado v1+v2: ${s.name}")
+                appliedStrategies += "Sign:v1+v2"
                 s
             } catch (e: Exception) {
                 emit("  ! Assinatura falhou: ${e.message}")

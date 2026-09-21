@@ -84,7 +84,7 @@ object AdPatcher {
             }
         }
 
-        if (bytesModified > 0) updateDexChecksum(patched)
+        if (bytesModified > 0) DexUtil.updateIntegrity(patched)
 
         return Pair(patched, AdPatchReport(patchedMethods, bytesModified))
     }
@@ -135,19 +135,5 @@ object AdPatcher {
             }
         }
         return -1
-    }
-
-    private fun updateDexChecksum(dex: ByteArray) {
-        if (dex.size < 112) return
-        var s1 = 1L; var s2 = 0L
-        for (i in 12 until dex.size) {
-            s1 = (s1 + (dex[i].toLong() and 0xFF)) % 65521
-            s2 = (s2 + s1) % 65521
-        }
-        val checksum = ((s2 shl 16) or s1).toInt()
-        dex[8]  = (checksum and 0xFF).toByte()
-        dex[9]  = ((checksum shr 8) and 0xFF).toByte()
-        dex[10] = ((checksum shr 16) and 0xFF).toByte()
-        dex[11] = ((checksum shr 24) and 0xFF).toByte()
     }
 }
