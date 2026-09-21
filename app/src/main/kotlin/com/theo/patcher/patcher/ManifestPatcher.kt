@@ -15,8 +15,9 @@ object ManifestPatcher {
 
         if (removeLicense) {
             nullOutString(result, "com.android.vending.CHECK_LICENSE")
-            nullOutString(result, "com.android.vending.BILLING")
             nullOutString(result, "com.google.android.c2dm.permission.RECEIVE")
+            // NOTE: com.android.vending.BILLING is intentionally kept —
+            // BillingPatcher needs billing to connect before it can intercept
         }
 
         if (removeAds) {

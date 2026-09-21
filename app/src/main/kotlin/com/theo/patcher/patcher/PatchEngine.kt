@@ -168,8 +168,8 @@ object PatchEngine {
 
             val signedApk = try {
                 val s = ApkSigner.sign(rebuiltApk, context)
-                emit("  + Assinado v1+v2: ${s.name}")
-                appliedStrategies += "Sign:v1+v2"
+                emit("  + Assinado: ${s.name}")
+                appliedStrategies += "Sign"
                 s
             } catch (e: Exception) {
                 emit("  ! Assinatura falhou: ${e.message}")

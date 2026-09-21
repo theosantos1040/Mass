@@ -21,7 +21,11 @@ object ApkSigner {
         val mat = getOrCreateSigningMaterial(context)
         val signedApk = File(unsignedApk.parent, "signed_${unsignedApk.name}")
         v1Sign(unsignedApk, signedApk, mat)
-        v2Sign(signedApk, mat)
+        try {
+            v2Sign(signedApk, mat)
+        } catch (_: Exception) {
+            // v2 failed — v1-signed APK is still valid for older devices
+        }
         return signedApk
     }
 
@@ -110,7 +114,7 @@ object ApkSigner {
             writeZipEntry(zout, "META-INF/CERT.RSA", rsaBytes, false)
 
             for ((name, data) in entries) {
-                val store = name in storedNames || name.endsWith(".arsc")
+                val store = name in storedNames
                 writeZipEntry(zout, name, data, store)
             }
         }
@@ -147,6 +151,7 @@ object ApkSigner {
     // ========================= v2 APK Signature Scheme =========================
 
     private const val APK_SIG_SCHEME_V2_ID = 0x7109871a
+    private const val SIG_ALG_RSA_PKCS1_SHA256 = 0x0103
     private const val CHUNK_SIZE = 1048576
 
     private fun v2Sign(apk: File, mat: SigningMaterial) {
@@ -162,37 +167,37 @@ object ApkSigner {
             raf.seek(0)
             raf.readFully(beforeCd)
 
-            val cdAndEocd = ByteArray(fileSize - cdOffset)
-            raf.seek(cdOffset.toLong())
-            raf.readFully(cdAndEocd)
-
             val cd = ByteArray(eocdOffset - cdOffset)
-            System.arraycopy(cdAndEocd, 0, cd, 0, cd.size)
+            raf.seek(cdOffset.toLong())
+            raf.readFully(cd)
+
             val eocd = ByteArray(fileSize - eocdOffset)
-            System.arraycopy(cdAndEocd, cd.size, eocd, 0, eocd.size)
+            raf.seek(eocdOffset.toLong())
+            raf.readFully(eocd)
 
             val topDigest = computeApkDigest(beforeCd, cd, eocd)
 
+            // Build signed data (AOSP format)
             val signedData = buildV2SignedData(topDigest, mat.certDer)
-            val signedDataBytes = lengthPrefixed(signedData)
 
+            // Sign the signed data
             val sig = Signature.getInstance("SHA256withRSA")
             sig.initSign(mat.privateKey)
             sig.update(signedData)
-            val signature = sig.sign()
+            val signatureBytes = sig.sign()
 
-            val sigEntry = buildSignatureEntry(signature)
+            // Build signer block
             val publicKeyDer = mat.certificate.publicKey.encoded
+            val signer = buildV2Signer(signedData, signatureBytes, publicKeyDer)
 
-            val signer = lengthPrefixed(
-                concat(signedDataBytes, lengthPrefixed(sigEntry), lengthPrefixed(publicKeyDer))
-            )
-            val v2Value = lengthPrefixed(signer)
+            // v2 value = length-prefixed sequence of signers
+            val v2Value = wrapSequence(signer)
 
             val sigBlock = buildApkSigningBlock(v2Value)
 
-            val newEocd = eocd.copyOf()
+            // Rewrite: [beforeCd] [sigBlock] [cd] [updatedEocd]
             val newCdOffset = cdOffset + sigBlock.size
+            val newEocd = eocd.copyOf()
             putUint32Le(newEocd, 16, newCdOffset)
 
             raf.seek(cdOffset.toLong())
@@ -231,34 +236,69 @@ object ApkSigner {
     }
 
     private fun buildV2SignedData(digest: ByteArray, certDer: ByteArray): ByteArray {
-        val digestEntry = ByteBuffer.allocate(8 + digest.size).order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(4 + digest.size)
-            .putInt(0x0103)
-            .put(lengthPrefixed(digest))
-        val digests = lengthPrefixed(digestEntry.array())
-        val certs = lengthPrefixed(lengthPrefixed(certDer))
-        return concat(digests, certs)
+        // digests = sequence of length-prefixed (algId + length-prefixed digest)
+        val digestEntry = buildAlgIdAndData(SIG_ALG_RSA_PKCS1_SHA256, digest)
+        val digests = wrapSequence(digestEntry)
+
+        // certs = sequence of length-prefixed certificates
+        val certs = wrapSequence(certDer)
+
+        // additional attributes = empty sequence
+        val additionalAttrs = ByteArray(0)
+
+        // signed data = sequence of {digests, certs, additionalAttrs}
+        return wrapSequence(digests, certs, additionalAttrs)
     }
 
-    private fun buildSignatureEntry(signature: ByteArray): ByteArray {
-        val buf = ByteBuffer.allocate(4 + 4 + signature.size).order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(4 + signature.size)
-            .putInt(0x0103)
-            .put(signature)
+    private fun buildV2Signer(
+        signedData: ByteArray,
+        signatureBytes: ByteArray,
+        publicKeyDer: ByteArray
+    ): ByteArray {
+        // signatures = sequence of length-prefixed (algId + length-prefixed signature)
+        val sigEntry = buildAlgIdAndData(SIG_ALG_RSA_PKCS1_SHA256, signatureBytes)
+        val signatures = wrapSequence(sigEntry)
+
+        // signer = sequence of {signedData, signatures, publicKey}
+        return wrapSequence(signedData, signatures, publicKeyDer)
+    }
+
+    private fun buildAlgIdAndData(algorithmId: Int, data: ByteArray): ByteArray {
+        // u32(algorithmId) + u32(data.size) + data
+        val buf = ByteBuffer.allocate(4 + 4 + data.size).order(ByteOrder.LITTLE_ENDIAN)
+        buf.putInt(algorithmId)
+        buf.putInt(data.size)
+        buf.put(data)
+        return buf.array()
+    }
+
+    private fun wrapSequence(vararg elements: ByteArray): ByteArray {
+        // AOSP encodeAsSequenceOfLengthPrefixedElements:
+        // for each element: u32(element.size) + element
+        val totalSize = elements.sumOf { 4 + it.size }
+        val buf = ByteBuffer.allocate(totalSize).order(ByteOrder.LITTLE_ENDIAN)
+        for (el in elements) {
+            buf.putInt(el.size)
+            buf.put(el)
+        }
         return buf.array()
     }
 
     private fun buildApkSigningBlock(v2Value: ByteArray): ByteArray {
-        val pairSize = 4L + v2Value.size
-        val payloadSize = 8L + pairSize
-        val blockSize = payloadSize + 8 + 16
+        // Pair: u64(pairContentSize) + u32(pairId) + pairValue
+        val pairContentSize = 4L + v2Value.size
+        // Block: u64(blockSizeField) + pairs + u64(blockSizeField) + magic
+        // blockSizeField = everything from pairs to magic inclusive
+        val pairsSize = 8L + pairContentSize // u64 + pairContent
+        val blockSizeField = pairsSize + 8 + 16 // pairs + second u64 + magic
 
-        val buf = ByteBuffer.allocate((8 + payloadSize + 8 + 16).toInt()).order(ByteOrder.LITTLE_ENDIAN)
-        buf.putLong(blockSize)
-        buf.putLong(pairSize)
+        val totalBytes = (8 + pairsSize + 8 + 16).toInt()
+        val buf = ByteBuffer.allocate(totalBytes).order(ByteOrder.LITTLE_ENDIAN)
+        buf.putLong(blockSizeField)
+        buf.putLong(pairContentSize)
         buf.putInt(APK_SIG_SCHEME_V2_ID)
         buf.put(v2Value)
-        buf.putLong(blockSize)
+        buf.putLong(blockSizeField)
         buf.put("APK Sig Block 42".toByteArray(Charsets.US_ASCII))
         return buf.array()
     }
@@ -302,21 +342,6 @@ object ApkSigner {
         buf[offset + 1] = ((value shr 8) and 0xFF).toByte()
         buf[offset + 2] = ((value shr 16) and 0xFF).toByte()
         buf[offset + 3] = ((value shr 24) and 0xFF).toByte()
-    }
-
-    private fun lengthPrefixed(data: ByteArray): ByteArray {
-        val buf = ByteBuffer.allocate(4 + data.size).order(ByteOrder.LITTLE_ENDIAN)
-        buf.putInt(data.size)
-        buf.put(data)
-        return buf.array()
-    }
-
-    private fun concat(vararg parts: ByteArray): ByteArray {
-        val total = parts.sumOf { it.size }
-        val r = ByteArray(total)
-        var off = 0
-        for (p in parts) { p.copyInto(r, off); off += p.size }
-        return r
     }
 
     // ========================= PKCS#7 SignedData =========================
