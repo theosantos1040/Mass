@@ -50,6 +50,14 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver
+            android:name=".util.InstallReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.theo.patcher.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

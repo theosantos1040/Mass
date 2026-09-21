@@ -36,7 +36,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.5 — apksig (Google lib)")
+        emit("  THEO PATCHER v0.6 — apksig + split install")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -46,6 +46,16 @@ object PatchEngine {
             val sourceApk = File(app.apkPath)
             val workDir = File(context.cacheDir, "theo_work_${app.packageName}").also {
                 it.deleteRecursively(); it.mkdirs()
+            }
+
+            val splits = sourceApk.parentFile?.listFiles { f ->
+                f.name.startsWith("split_") && f.name.endsWith(".apk")
+            }?.toList() ?: emptyList()
+
+            if (splits.isNotEmpty()) {
+                emit("⚠ Split APK detectado: ${splits.size} splits além do base")
+                splits.forEach { emit("    - ${it.name}") }
+                emit("  → Instalação via session (PackageInstaller)")
             }
 
             emit("\n[1/8] Escaneando padroes...")
@@ -165,11 +175,18 @@ object PatchEngine {
                 }
             }
 
-            emit("\n[8/8] Rebuild + Assinatura (v1+v2)...")
-            val rebuiltApk = File(workDir, "rebuilt.apk")
-            ApkBuilder.rebuild(sourceApk, rebuiltApk, patchedEntries)
-            emit("  + APK rebuilt: ${rebuiltApk.length() / 1024} KB")
-            appliedStrategies += "Rebuild"
+            val rebuiltApk: File
+            if (patchedEntries.isEmpty()) {
+                emit("\n[8/8] Sem patches — pulando rebuild, apenas re-assinando")
+                rebuiltApk = sourceApk
+                appliedStrategies += "PureResign"
+            } else {
+                emit("\n[8/8] Rebuild + Assinatura (v1+v2)...")
+                rebuiltApk = File(workDir, "rebuilt.apk")
+                ApkBuilder.rebuild(sourceApk, rebuiltApk, patchedEntries)
+                emit("  + APK rebuilt: ${rebuiltApk.length() / 1024} KB")
+                appliedStrategies += "Rebuild"
+            }
 
             val signedApk = try {
                 val s = ApkSigner.sign(rebuiltApk, context) { line -> emit(line) }
@@ -193,7 +210,7 @@ object PatchEngine {
             emit("Output: ${outputApk.absolutePath}")
             emit("Estrategias: ${appliedStrategies.joinToString(", ")}")
 
-            PatchResult(true, outputApk, appliedStrategies, log.toString())
+            PatchResult(true, outputApk, appliedStrategies, log.toString(), splitApks = splits)
 
         } catch (e: Exception) {
             emit("\n[ERRO] ${e.javaClass.simpleName}: ${e.message}")

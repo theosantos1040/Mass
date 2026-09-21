@@ -8,5 +8,6 @@ data class PatchResult(
     val outputApk: File?,
     val appliedStrategies: List<String>,
     val log: String,
-    val error: String? = null
+    val error: String? = null,
+    val splitApks: List<File> = emptyList()
 )

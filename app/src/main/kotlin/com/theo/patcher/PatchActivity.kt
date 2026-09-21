@@ -19,6 +19,7 @@ import com.theo.patcher.scanner.IAPDetector
 import com.theo.patcher.scanner.LicenseDetector
 import com.theo.patcher.scanner.ProtectionDetector
 import com.theo.patcher.util.RootUtil
+import com.theo.patcher.util.SessionInstaller
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,6 +47,7 @@ class PatchActivity : AppCompatActivity() {
     private lateinit var progressBar: android.widget.ProgressBar
 
     private var outputApk: File? = null
+    private var splitApks: List<File> = emptyList()
     private lateinit var appInfo: AppInfo
     private var pkg = ""
     private var pendingInstall = false
@@ -126,7 +128,7 @@ class PatchActivity : AppCompatActivity() {
             appendLog("✓ Original desinstalado.")
             val apk = outputApk ?: return
             appendLog("Instalando patcheado...")
-            installViaIntent(apk)
+            installBest(apk)
         }
         btnUninstall.visibility = if (isPackageInstalled(pkg)) View.VISIBLE else View.GONE
     }
@@ -206,6 +208,7 @@ class PatchActivity : AppCompatActivity() {
 
             if (result.success && result.outputApk != null) {
                 outputApk = result.outputApk
+                splitApks = result.splitApks
                 appendLog("\nPatch concluido! Instalando...")
                 autoInstall()
             } else {
@@ -248,8 +251,23 @@ class PatchActivity : AppCompatActivity() {
                 btnInstall.visibility = View.VISIBLE
                 uninstallOriginal()
             } else {
+                installBest(apk)
+            }
+        }
+    }
+
+    private fun installBest(apk: File) {
+        if (splitApks.isNotEmpty()) {
+            appendLog("\nInstalando split APK (${splitApks.size + 1} apks)...")
+            try {
+                SessionInstaller.install(this, apk, splitApks) { line -> appendLog(line) }
+            } catch (e: Exception) {
+                appendLog("Session install falhou: ${e.message}")
+                appendLog("Fallback para intent install (só base.apk)...")
                 installViaIntent(apk)
             }
+        } else {
+            installViaIntent(apk)
         }
     }
 
@@ -266,7 +284,7 @@ class PatchActivity : AppCompatActivity() {
             uninstallOriginal()
             return
         }
-        installViaIntent(apk)
+        installBest(apk)
     }
 
     private fun installViaIntent(apk: File) {
