@@ -83,7 +83,7 @@
             <ScrollView
                 android:id="@+id/scrollLog"
                 android:layout_width="match_parent"
-                android:layout_height="260dp"
+                android:layout_height="240dp"
                 android:background="@color/bg_card">
 
                 <TextView
@@ -138,6 +138,18 @@
             android:textStyle="bold"
             android:backgroundTint="@color/bg_card"
             android:visibility="gone" />
+
+        <Button
+            android:id="@+id/btnUninstall"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:text="DESINSTALAR ORIGINAL"
+            android:textColor="#FF4444"
+            android:textStyle="bold"
+            android:backgroundTint="@color/bg_card"
+            android:visibility="gone" />
+
     </LinearLayout>
 
 </LinearLayout>

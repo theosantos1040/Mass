@@ -1,7 +1,7 @@
-// PatchActivity.kt — patch options screen + live log for a single app
 package com.theo.patcher
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -31,6 +31,7 @@ class PatchActivity : AppCompatActivity() {
     private lateinit var tvIapInfo: TextView
     private lateinit var btnPatch: Button
     private lateinit var btnInstall: Button
+    private lateinit var btnUninstall: Button
     private lateinit var tvLog: TextView
     private lateinit var scrollLog: ScrollView
     private lateinit var progressBar: android.widget.ProgressBar
@@ -42,20 +43,22 @@ class PatchActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_patch)
 
-        tvAppName   = findViewById(R.id.tvAppName)
-        tvIapInfo   = findViewById(R.id.tvIapInfo)
-        btnPatch    = findViewById(R.id.btnPatch)
-        btnInstall  = findViewById(R.id.btnInstall)
-        tvLog       = findViewById(R.id.tvLog)
-        scrollLog   = findViewById(R.id.scrollLog)
-        progressBar = findViewById(R.id.progressBar)
+        tvAppName    = findViewById(R.id.tvAppName)
+        tvIapInfo    = findViewById(R.id.tvIapInfo)
+        btnPatch     = findViewById(R.id.btnPatch)
+        btnInstall   = findViewById(R.id.btnInstall)
+        btnUninstall = findViewById(R.id.btnUninstall)
+        tvLog        = findViewById(R.id.tvLog)
+        scrollLog    = findViewById(R.id.scrollLog)
+        progressBar  = findViewById(R.id.progressBar)
 
         val pkg     = intent.getStringExtra(EXTRA_PACKAGE) ?: return finish()
         val name    = intent.getStringExtra(EXTRA_APP_NAME) ?: pkg
         val apkPath = intent.getStringExtra(EXTRA_APK_PATH) ?: return finish()
 
         tvAppName.text = name
-        btnInstall.visibility = View.GONE
+        btnInstall.visibility   = View.GONE
+        btnUninstall.visibility = View.GONE
 
         lifecycleScope.launch {
             val purchases = withContext(Dispatchers.IO) { IAPDetector.detect(File(apkPath)) }
@@ -70,11 +73,21 @@ class PatchActivity : AppCompatActivity() {
                 detectedPurchases = purchases
             )
             tvIapInfo.text = buildIapSummary(purchases)
+
+            // show uninstall only if app is actually installed
+            val isInstalled = isPackageInstalled(pkg)
+            if (isInstalled) btnUninstall.visibility = View.VISIBLE
         }
 
         btnPatch.setOnClickListener { startPatch() }
         btnInstall.setOnClickListener { installOutput() }
+        btnUninstall.setOnClickListener { uninstallOriginal(pkg) }
     }
+
+    private fun isPackageInstalled(pkg: String): Boolean = try {
+        packageManager.getPackageInfo(pkg, 0)
+        true
+    } catch (e: Exception) { false }
 
     private fun buildIapSummary(list: List<PurchaseInfo>): String {
         if (list.isEmpty()) return "Nenhum IAP detectado — app pode ainda ter validação oculta"
@@ -92,8 +105,8 @@ class PatchActivity : AppCompatActivity() {
 
     private fun startPatch() {
         btnPatch.isEnabled = false
-        btnInstall.visibility = View.GONE
-        progressBar.visibility = View.VISIBLE
+        btnInstall.visibility   = View.GONE
+        progressBar.visibility  = View.VISIBLE
         tvLog.text = ""
         appendLog("Iniciando Theo Patcher...\n")
 
@@ -110,7 +123,7 @@ class PatchActivity : AppCompatActivity() {
             if (result.success && result.outputApk != null) {
                 outputApk = result.outputApk
                 btnInstall.visibility = View.VISIBLE
-                appendLog("\n✅ Patch concluído! Toque em INSTALAR para instalar.")
+                appendLog("\n✅ Patch concluído! Instale abaixo.")
             } else {
                 appendLog("\n❌ Falha: ${result.error}")
             }
@@ -125,11 +138,16 @@ class PatchActivity : AppCompatActivity() {
     private fun installOutput() {
         val apk = outputApk ?: return
         val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
+        startActivity(Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        startActivity(intent)
+        })
+    }
+
+    private fun uninstallOriginal(pkg: String) {
+        startActivity(Intent(Intent.ACTION_DELETE).apply {
+            data = Uri.parse("package:$pkg")
+        })
     }
 }
