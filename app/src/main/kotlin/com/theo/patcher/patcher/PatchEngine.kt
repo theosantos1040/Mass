@@ -34,7 +34,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.2 — Full Bypass")
+        emit("  THEO PATCHER v0.3 — Aligned Signing")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -67,76 +67,75 @@ object PatchEngine {
                     .toList()
 
                 for (entry in dexEntries) {
-                    var dexBytes = zip.getInputStream(entry).readBytes()
+                    val originalDex = zip.getInputStream(entry).readBytes()
+                    var dexBytes = originalDex
                     var totalPatched = 0
+
+                    fun tryPatch(label: String, doPatch: (ByteArray) -> Pair<ByteArray, Int>?) {
+                        val result = doPatch(dexBytes) ?: return
+                        val (patched, bytesModified) = result
+                        if (bytesModified <= 0) return
+                        if (!DexUtil.looksValid(patched)) {
+                            emit("  ! $label: patch corromperia DEX, descartado")
+                            return
+                        }
+                        dexBytes = patched
+                        totalPatched += bytesModified
+                        appliedStrategies += "$label:${entry.name}"
+                    }
 
                     if (options.patchIAP) {
                         emit("\n[2/8] Patching DEX - IAP bypass (${entry.name})...")
-                        val (patched, report) = DexPatcher.patch(dexBytes, purchases)
-                        if (report.bytesModified > 0) {
-                            dexBytes = patched
-                            totalPatched += report.bytesModified
-                            emit("  + ${entry.name} IAP: ${report.patchedMethods.size} metodo(s)")
-                            report.patchedMethods.forEach { m -> emit("    - $m") }
-                            appliedStrategies += "IAP:${entry.name}"
-                        } else {
-                            emit("  ~ ${entry.name}: sem padroes IAP")
+                        tryPatch("IAP") {
+                            val (p, r) = DexPatcher.patch(it, purchases)
+                            if (r.bytesModified > 0) {
+                                emit("  + ${entry.name} IAP: ${r.patchedMethods.size} metodo(s)")
+                                p to r.bytesModified
+                            } else { emit("  ~ ${entry.name}: sem padroes IAP"); null }
                         }
                     }
 
                     if (options.patchBilling) {
                         emit("\n[3/8] Patching DEX - billing bypass (${entry.name})...")
-                        val (patched, report) = BillingPatcher.patch(dexBytes)
-                        if (report.bytesModified > 0) {
-                            dexBytes = patched
-                            totalPatched += report.bytesModified
-                            emit("  + ${entry.name} Billing: ${report.patchedMethods.size} metodo(s)")
-                            report.patchedMethods.forEach { m -> emit("    - $m") }
-                            appliedStrategies += "Billing:${entry.name}"
-                        } else {
-                            emit("  ~ ${entry.name}: sem padroes Billing")
+                        tryPatch("Billing") {
+                            val (p, r) = BillingPatcher.patch(it)
+                            if (r.bytesModified > 0) {
+                                emit("  + ${entry.name} Billing: ${r.patchedMethods.size} metodo(s)")
+                                p to r.bytesModified
+                            } else { emit("  ~ ${entry.name}: sem padroes Billing"); null }
                         }
                     }
 
                     if (options.patchAds && ads.isNotEmpty()) {
                         emit("\n[4/8] Patching DEX - remocao de anuncios (${entry.name})...")
-                        val (patched, report) = AdPatcher.patch(dexBytes)
-                        if (report.bytesModified > 0) {
-                            dexBytes = patched
-                            totalPatched += report.bytesModified
-                            emit("  + ${entry.name} Ads: ${report.patchedMethods.size} metodo(s)")
-                            report.patchedMethods.forEach { m -> emit("    - $m") }
-                            appliedStrategies += "Ads:${entry.name}"
-                        } else {
-                            emit("  ~ ${entry.name}: sem metodos de ad patchaveis")
+                        tryPatch("Ads") {
+                            val (p, r) = AdPatcher.patch(it)
+                            if (r.bytesModified > 0) {
+                                emit("  + ${entry.name} Ads: ${r.patchedMethods.size} metodo(s)")
+                                p to r.bytesModified
+                            } else { emit("  ~ ${entry.name}: sem metodos de ad patchaveis"); null }
                         }
                     }
 
                     if (options.patchLicense && license != null) {
                         emit("\n[5/8] Patching DEX - bypass de licenca (${entry.name})...")
-                        val (patched, report) = LicensePatcher.patch(dexBytes)
-                        if (report.bytesModified > 0) {
-                            dexBytes = patched
-                            totalPatched += report.bytesModified
-                            emit("  + ${entry.name} License: ${report.patchedMethods.size} metodo(s)")
-                            report.patchedMethods.forEach { m -> emit("    - $m") }
-                            appliedStrategies += "License:${entry.name}"
-                        } else {
-                            emit("  ~ ${entry.name}: sem padroes de licenca")
+                        tryPatch("License") {
+                            val (p, r) = LicensePatcher.patch(it)
+                            if (r.bytesModified > 0) {
+                                emit("  + ${entry.name} License: ${r.patchedMethods.size} metodo(s)")
+                                p to r.bytesModified
+                            } else { emit("  ~ ${entry.name}: sem padroes de licenca"); null }
                         }
                     }
 
                     if (options.patchProtection && protections.isNotEmpty()) {
                         emit("\n[6/8] Patching DEX - bypass de protecao (${entry.name})...")
-                        val (patched, report) = ProtectionPatcher.patch(dexBytes)
-                        if (report.bytesModified > 0) {
-                            dexBytes = patched
-                            totalPatched += report.bytesModified
-                            emit("  + ${entry.name} Protection: ${report.patchedMethods.size} metodo(s)")
-                            report.patchedMethods.forEach { m -> emit("    - $m") }
-                            appliedStrategies += "Protection:${entry.name}"
-                        } else {
-                            emit("  ~ ${entry.name}: sem protecoes patchaveis")
+                        tryPatch("Protection") {
+                            val (p, r) = ProtectionPatcher.patch(it)
+                            if (r.bytesModified > 0) {
+                                emit("  + ${entry.name} Protection: ${r.patchedMethods.size} metodo(s)")
+                                p to r.bytesModified
+                            } else { emit("  ~ ${entry.name}: sem protecoes patchaveis"); null }
                         }
                     }
 

@@ -5,6 +5,8 @@ import android.util.Base64
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FilterOutputStream
+import java.io.OutputStream
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -65,6 +67,12 @@ object ApkSigner {
 
     // ========================= v1 JAR signing =========================
 
+    private class CountingOutputStream(out: OutputStream) : FilterOutputStream(out) {
+        var bytesWritten = 0L; private set
+        override fun write(b: Int) { out.write(b); bytesWritten++ }
+        override fun write(b: ByteArray, off: Int, len: Int) { out.write(b, off, len); bytesWritten += len }
+    }
+
     private fun v1Sign(input: File, output: File, mat: SigningMaterial) {
         val entries = linkedMapOf<String, ByteArray>()
         val storedNames = mutableSetOf<String>()
@@ -108,25 +116,39 @@ object ApkSigner {
         sig.update(sfBytes)
         val rsaBytes = buildPkcs7(mat.certDer, mat.certificate, sig.sign())
 
-        ZipOutputStream(output.outputStream().buffered()).use { zout ->
-            writeZipEntry(zout, "META-INF/MANIFEST.MF", mfBytes, false)
-            writeZipEntry(zout, "META-INF/CERT.SF", sfBytes, false)
-            writeZipEntry(zout, "META-INF/CERT.RSA", rsaBytes, false)
+        val cos = CountingOutputStream(output.outputStream().buffered())
+        ZipOutputStream(cos).use { zout ->
+            writeZipEntry(zout, cos, "META-INF/MANIFEST.MF", mfBytes, false)
+            writeZipEntry(zout, cos, "META-INF/CERT.SF", sfBytes, false)
+            writeZipEntry(zout, cos, "META-INF/CERT.RSA", rsaBytes, false)
 
             for ((name, data) in entries) {
                 val store = name in storedNames
-                writeZipEntry(zout, name, data, store)
+                writeZipEntry(zout, cos, name, data, store)
             }
         }
     }
 
-    private fun writeZipEntry(zout: ZipOutputStream, name: String, data: ByteArray, stored: Boolean) {
+    private fun writeZipEntry(
+        zout: ZipOutputStream,
+        cos: CountingOutputStream,
+        name: String,
+        data: ByteArray,
+        stored: Boolean
+    ) {
         val ze = ZipEntry(name)
         if (stored) {
             ze.method = ZipEntry.STORED
             ze.size = data.size.toLong()
             ze.compressedSize = data.size.toLong()
             ze.crc = CRC32().also { it.update(data) }.value
+
+            // Alignment: .so → 4096-byte page-align (extractNativeLibs=false), other STORED → 4-byte align
+            val alignment = if (name.endsWith(".so")) 4096 else 4
+            val nameLen = name.toByteArray(Charsets.UTF_8).size
+            val unalignedDataStart = cos.bytesWritten + 30 + nameLen
+            val padding = ((alignment - (unalignedDataStart % alignment).toInt()) % alignment)
+            if (padding > 0) ze.extra = ByteArray(padding)
         } else {
             ze.method = ZipEntry.DEFLATED
         }
