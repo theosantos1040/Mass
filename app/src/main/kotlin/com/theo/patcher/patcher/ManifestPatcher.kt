@@ -1,19 +1,31 @@
-// patcher/ManifestPatcher.kt — binary AndroidManifest.xml patcher
 package com.theo.patcher.patcher
 
 object ManifestPatcher {
 
-    private val PERMISSIONS_TO_REMOVE = listOf(
-        "com.android.vending.CHECK_LICENSE",
-        "com.android.vending.BILLING",
-        "com.google.android.c2dm.permission.RECEIVE"
+    private val AD_COMPONENTS_TO_REMOVE = listOf(
+        "AdActivity",
+        "com.google.android.gms.ads",
+        "AudienceNetworkActivity",
+        "com.facebook.ads",
+        "UnityAdsFullscreenActivity"
     )
 
-    fun patch(manifestBytes: ByteArray): ByteArray {
+    fun patch(manifestBytes: ByteArray, removeAds: Boolean = true, removeLicense: Boolean = true): ByteArray {
         val result = manifestBytes.copyOf()
-        for (permission in PERMISSIONS_TO_REMOVE) {
-            nullOutString(result, permission)
+
+        if (removeLicense) {
+            nullOutString(result, "com.android.vending.CHECK_LICENSE")
+            nullOutString(result, "com.android.vending.BILLING")
+            nullOutString(result, "com.google.android.c2dm.permission.RECEIVE")
         }
+
+        if (removeAds) {
+            nullOutString(result, "com.google.android.gms.permission.AD_ID")
+            for (component in AD_COMPONENTS_TO_REMOVE) {
+                nullOutString(result, component)
+            }
+        }
+
         return result
     }
 

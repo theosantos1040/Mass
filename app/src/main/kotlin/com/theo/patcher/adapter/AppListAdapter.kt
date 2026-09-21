@@ -1,4 +1,3 @@
-// adapter/AppListAdapter.kt — RecyclerView adapter for app list (Lucky Patcher style)
 package com.theo.patcher.adapter
 
 import android.view.LayoutInflater
@@ -6,7 +5,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -36,9 +34,8 @@ class AppListAdapter(
         val icon: ImageView    = view.findViewById(R.id.ivAppIcon)
         val name: TextView     = view.findViewById(R.id.tvAppName)
         val pkg: TextView      = view.findViewById(R.id.tvPackageName)
-        val badge: TextView    = view.findViewById(R.id.tvIapBadge)
-        val iapCount: TextView = view.findViewById(R.id.tvIapCount)
         val size: TextView     = view.findViewById(R.id.tvApkSize)
+        val version: TextView  = view.findViewById(R.id.tvVersion)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = ViewHolder(
@@ -51,32 +48,7 @@ class AppListAdapter(
         holder.name.text = app.appName
         holder.pkg.text  = app.packageName
         holder.size.text = formatSize(app.apkSize)
-
-        when (app.iapStatus) {
-            AppInfo.IAPStatus.HAS_IAP -> {
-                holder.badge.text = "IAP"
-                holder.badge.setBackgroundColor(ContextCompat.getColor(holder.itemView.context, R.color.badge_iap))
-                holder.badge.visibility = View.VISIBLE
-                holder.iapCount.text = "${app.detectedPurchases.size} compra(s)"
-                holder.iapCount.visibility = View.VISIBLE
-            }
-            AppInfo.IAPStatus.PATCHED -> {
-                holder.badge.text = "PATCHADO"
-                holder.badge.setBackgroundColor(ContextCompat.getColor(holder.itemView.context, R.color.badge_patched))
-                holder.badge.visibility = View.VISIBLE
-                holder.iapCount.visibility = View.GONE
-            }
-            AppInfo.IAPStatus.NO_IAP -> {
-                holder.badge.text = "SEM IAP"
-                holder.badge.setBackgroundColor(ContextCompat.getColor(holder.itemView.context, R.color.badge_no_iap))
-                holder.badge.visibility = View.VISIBLE
-                holder.iapCount.visibility = View.GONE
-            }
-            else -> {
-                holder.badge.visibility = View.GONE
-                holder.iapCount.visibility = View.GONE
-            }
-        }
+        holder.version.text = app.versionName
 
         holder.itemView.setOnClickListener { onAppClick(app) }
     }
