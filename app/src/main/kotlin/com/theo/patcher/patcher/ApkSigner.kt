@@ -1,116 +1,248 @@
-// patcher/ApkSigner.kt — signs patched APK with a generated debug keystore
 package com.theo.patcher.patcher
 
 import android.content.Context
-import com.theo.patcher.util.RootUtil
+import android.util.Base64
+import java.io.ByteArrayInputStream
 import java.io.File
-import java.security.KeyPairGenerator
-import java.security.KeyStore
+import java.security.*
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
-import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.zip.*
 
 object ApkSigner {
 
-    private const val KEYSTORE_FILE = "theo_patch_key.jks"
-    private const val KEY_ALIAS     = "theopatch"
-    private const val KEY_PASS      = "theopatch123"
+    fun sign(unsignedApk: File, context: Context): File {
+        val mat = getOrCreateSigningMaterial(context)
+        val signedApk = File(unsignedApk.parent, "signed_${unsignedApk.name}")
+        v1Sign(unsignedApk, signedApk, mat)
+        return signedApk
+    }
 
-    fun sign(apk: File, context: Context): File {
-        val keystore = getOrCreateKeystore(context)
-        val signedApk = File(apk.parent, "signed_${apk.name}")
+    private class SigningMaterial(
+        val privateKey: PrivateKey,
+        val certificate: X509Certificate,
+        val certDer: ByteArray
+    )
 
-        return try {
-            signWithApkSig(apk, signedApk, keystore)
-            signedApk
-        } catch (e: Exception) {
-            signWithShell(apk, signedApk, keystore)
-            signedApk
+    private fun getOrCreateSigningMaterial(context: Context): SigningMaterial {
+        val p12 = File(context.filesDir, "theo_sign.p12")
+        val pass = "theopatch".toCharArray()
+        val alias = "theopatch"
+
+        if (p12.exists()) {
+            val ks = KeyStore.getInstance("PKCS12")
+            p12.inputStream().use { ks.load(it, pass) }
+            val key = ks.getKey(alias, pass) as PrivateKey
+            val cert = ks.getCertificate(alias) as X509Certificate
+            return SigningMaterial(key, cert, cert.encoded)
         }
-    }
 
-    private fun signWithApkSig(input: File, output: File, keystore: File) {
-        val signerClass = Class.forName("com.android.apksig.ApkSigner")
-        val builderClass = Class.forName("com.android.apksig.ApkSigner\$Builder")
-
-        val ks = KeyStore.getInstance("JKS").apply {
-            load(keystore.inputStream(), KEY_PASS.toCharArray())
-        }
-        val privateKey = ks.getKey(KEY_ALIAS, KEY_PASS.toCharArray()) as java.security.PrivateKey
-        val certChain = ks.getCertificateChain(KEY_ALIAS).map { it as X509Certificate }
-
-        val signerConfigBuilder = Class.forName("com.android.apksig.ApkSigner\$SignerConfig\$Builder")
-        val scb = signerConfigBuilder.getConstructor(String::class.java, java.security.PrivateKey::class.java, List::class.java)
-            .newInstance("CERT", privateKey, certChain)
-        val signerConfig = signerConfigBuilder.getMethod("build").invoke(scb)
-
-        val builder = builderClass.getConstructor(List::class.java).newInstance(listOf(signerConfig))
-        builderClass.getMethod("setInputApk", File::class.java).invoke(builder, input)
-        builderClass.getMethod("setOutputApk", File::class.java).invoke(builder, output)
-        builderClass.getMethod("setV1SigningEnabled", Boolean::class.java).invoke(builder, true)
-        builderClass.getMethod("setV2SigningEnabled", Boolean::class.java).invoke(builder, true)
-        val signer = builderClass.getMethod("build").invoke(builder)
-        signerClass.getMethod("sign").invoke(signer)
-    }
-
-    private fun signWithShell(input: File, output: File, keystore: File) {
-        RootUtil.exec(
-            "jarsigner -keystore ${keystore.absolutePath}" +
-            " -storepass $KEY_PASS -keypass $KEY_PASS" +
-            " -signedjar ${output.absolutePath}" +
-            " ${input.absolutePath} $KEY_ALIAS"
-        )
-    }
-
-    private fun getOrCreateKeystore(context: Context): File {
-        val ksFile = File(context.filesDir, KEYSTORE_FILE)
-        if (ksFile.exists()) return ksFile
-
-        val kpg = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }
+        val kpg = KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
         val kp = kpg.generateKeyPair()
-        val cert = generateSelfSignedCert(kp)
+        val certDer = buildSelfSignedCert(kp)
+        val cert = CertificateFactory.getInstance("X.509")
+            .generateCertificate(ByteArrayInputStream(certDer)) as X509Certificate
 
-        val ks = KeyStore.getInstance("JKS").apply {
-            load(null, KEY_PASS.toCharArray())
-            setKeyEntry(KEY_ALIAS, kp.private, KEY_PASS.toCharArray(), arrayOf(cert))
-        }
-        ksFile.outputStream().use { ks.store(it, KEY_PASS.toCharArray()) }
-        return ksFile
+        val ks = KeyStore.getInstance("PKCS12")
+        ks.load(null, pass)
+        ks.setKeyEntry(alias, kp.private, pass, arrayOf(cert))
+        p12.outputStream().use { ks.store(it, pass) }
+
+        return SigningMaterial(kp.private, cert, certDer)
     }
 
-    private fun generateSelfSignedCert(kp: java.security.KeyPair): X509Certificate {
-        val subject = "CN=TheoPatcher, O=TheoPatcher, C=BR"
-        try {
-            val x500Class = Class.forName("sun.security.x509.X500Name")
-            val x500Name = x500Class.getConstructor(String::class.java).newInstance(subject)
-            val certInfoClass = Class.forName("sun.security.x509.X509CertInfo")
-            val certInfo = certInfoClass.newInstance()
-            val dateClass = Class.forName("sun.security.x509.CertificateValidity")
-            val now = Date()
-            val exp = Date(now.time + 365L * 24 * 60 * 60 * 1000 * 10)
-            val validity = dateClass.getConstructor(Date::class.java, Date::class.java).newInstance(now, exp)
-            val setMethod = certInfoClass.getMethod("set", String::class.java, Any::class.java)
-            setMethod.invoke(certInfo, "validity", validity)
-            val snClass = Class.forName("sun.security.x509.CertificateSerialNumber")
-            setMethod.invoke(certInfo, "serialNumber", snClass.getConstructor(Int::class.java).newInstance(1))
-            val subjectClass = Class.forName("sun.security.x509.CertificateSubjectName")
-            setMethod.invoke(certInfo, "subject", subjectClass.getConstructor(x500Class).newInstance(x500Name))
-            val issuerClass = Class.forName("sun.security.x509.CertificateIssuerName")
-            setMethod.invoke(certInfo, "issuer", issuerClass.getConstructor(x500Class).newInstance(x500Name))
-            val keyClass = Class.forName("sun.security.x509.CertificateX509Key")
-            setMethod.invoke(certInfo, "key", keyClass.getConstructor(java.security.PublicKey::class.java).newInstance(kp.public))
-            val algClass = Class.forName("sun.security.x509.CertificateAlgorithmId")
-            val algIdClass = Class.forName("sun.security.x509.AlgorithmId")
-            val sha256rsa = algIdClass.getMethod("get", String::class.java).invoke(null, "SHA256withRSA")
-            setMethod.invoke(certInfo, "algorithmID", algClass.getConstructor(algIdClass).newInstance(sha256rsa))
-            val certVersionClass = Class.forName("sun.security.x509.CertificateVersion")
-            setMethod.invoke(certInfo, "version", certVersionClass.newInstance())
-            val x509Class = Class.forName("sun.security.x509.X509CertImpl")
-            val x509Cert = x509Class.getConstructor(certInfoClass).newInstance(certInfo)
-            x509Class.getMethod("sign", java.security.PrivateKey::class.java, String::class.java)
-                .invoke(x509Cert, kp.private, "SHA256withRSA")
-            return x509Cert as X509Certificate
-        } catch (e: Exception) {
-            throw RuntimeException("Cannot generate signing certificate: ${e.message}")
+    // --- v1 JAR signing ---
+
+    private fun v1Sign(input: File, output: File, mat: SigningMaterial) {
+        val entries = linkedMapOf<String, ByteArray>()
+        val storedNames = mutableSetOf<String>()
+
+        ZipFile(input).use { zip ->
+            zip.entries().asSequence()
+                .filter { !it.name.startsWith("META-INF/") }
+                .forEach { entry ->
+                    entries[entry.name] = zip.getInputStream(entry).readBytes()
+                    if (entry.method == ZipEntry.STORED) storedNames += entry.name
+                }
         }
+
+        val md = MessageDigest.getInstance("SHA-256")
+
+        val mfSections = linkedMapOf<String, String>()
+        val mf = StringBuilder()
+        mf.append("Manifest-Version: 1.0\r\n")
+        mf.append("Created-By: TheoPatcher\r\n\r\n")
+        for ((name, data) in entries) {
+            val digest = Base64.encodeToString(md.digest(data), Base64.NO_WRAP)
+            val section = wrap("Name: $name") + wrap("SHA-256-Digest: $digest") + "\r\n"
+            mf.append(section)
+            mfSections[name] = section
+        }
+        val mfBytes = mf.toString().toByteArray(Charsets.UTF_8)
+
+        val sf = StringBuilder()
+        sf.append("Signature-Version: 1.0\r\n")
+        sf.append("Created-By: TheoPatcher\r\n")
+        sf.append(wrap("SHA-256-Digest-Manifest: ${Base64.encodeToString(md.digest(mfBytes), Base64.NO_WRAP)}"))
+        sf.append("\r\n")
+        for ((name, section) in mfSections) {
+            val d = Base64.encodeToString(md.digest(section.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+            sf.append(wrap("Name: $name") + wrap("SHA-256-Digest: $d") + "\r\n")
+        }
+        val sfBytes = sf.toString().toByteArray(Charsets.UTF_8)
+
+        val sig = Signature.getInstance("SHA256withRSA")
+        sig.initSign(mat.privateKey)
+        sig.update(sfBytes)
+        val rsaBytes = buildPkcs7(mat.certDer, mat.certificate, sig.sign())
+
+        ZipOutputStream(output.outputStream().buffered()).use { zout ->
+            writeZipEntry(zout, "META-INF/MANIFEST.MF", mfBytes, false)
+            writeZipEntry(zout, "META-INF/CERT.SF", sfBytes, false)
+            writeZipEntry(zout, "META-INF/CERT.RSA", rsaBytes, false)
+
+            for ((name, data) in entries) {
+                val store = name in storedNames || name.endsWith(".arsc")
+                writeZipEntry(zout, name, data, store)
+            }
+        }
+    }
+
+    private fun writeZipEntry(zout: ZipOutputStream, name: String, data: ByteArray, stored: Boolean) {
+        val ze = ZipEntry(name)
+        if (stored) {
+            ze.method = ZipEntry.STORED
+            ze.size = data.size.toLong()
+            ze.compressedSize = data.size.toLong()
+            ze.crc = CRC32().also { it.update(data) }.value
+        } else {
+            ze.method = ZipEntry.DEFLATED
+        }
+        zout.putNextEntry(ze)
+        zout.write(data)
+        zout.closeEntry()
+    }
+
+    private fun wrap(line: String): String {
+        if (line.length <= 70) return "$line\r\n"
+        val sb = StringBuilder()
+        sb.append(line, 0, 70).append("\r\n")
+        var i = 70
+        while (i < line.length) {
+            val end = minOf(i + 69, line.length)
+            sb.append(' ').append(line, i, end).append("\r\n")
+            i = end
+        }
+        return sb.toString()
+    }
+
+    // --- PKCS#7 SignedData for .RSA ---
+
+    private fun buildPkcs7(certDer: ByteArray, cert: X509Certificate, signature: ByteArray): ByteArray {
+        val issuerDer = cert.issuerX500Principal.encoded
+        val serialDer = cert.serialNumber.toByteArray()
+        val digestAlg = seq(oid(OID_SHA256))
+        val encAlg = seq(oid(OID_RSA), DER_NULL)
+
+        val signerInfo = seq(
+            int(byteArrayOf(1)),
+            seq(issuerDer, int(serialDer)),
+            digestAlg,
+            encAlg,
+            oct(signature)
+        )
+
+        val signedData = seq(
+            int(byteArrayOf(1)),
+            set(digestAlg),
+            seq(oid(OID_DATA)),
+            ctx(0, certDer),
+            set(signerInfo)
+        )
+
+        return seq(oid(OID_SIGNED_DATA), ctx(0, signedData))
+    }
+
+    // --- Self-signed X.509 certificate (raw DER) ---
+
+    private fun buildSelfSignedCert(kp: KeyPair): ByteArray {
+        val cn = seq(set(seq(oid(OID_CN), utf8("TheoPatcher"))))
+        val now = Date()
+        val exp = Date(now.time + 10L * 365 * 86400000)
+        val validity = seq(utcTime(now), utcTime(exp))
+        val algId = seq(oid(OID_SHA256_RSA), DER_NULL)
+
+        val tbs = seq(
+            ctx(0, int(byteArrayOf(2))),
+            int(byteArrayOf(1)),
+            algId,
+            cn,
+            validity,
+            cn,
+            kp.public.encoded
+        )
+
+        val sig = Signature.getInstance("SHA256withRSA")
+        sig.initSign(kp.private)
+        sig.update(tbs)
+
+        return seq(tbs, algId, bitStr(sig.sign()))
+    }
+
+    // --- DER encoding primitives ---
+
+    private val OID_SHA256_RSA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x0B)
+    private val OID_RSA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01)
+    private val OID_SHA256 = bytes(0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01)
+    private val OID_CN = bytes(0x55, 0x04, 0x03)
+    private val OID_SIGNED_DATA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02)
+    private val OID_DATA = bytes(0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x01)
+    private val DER_NULL = byteArrayOf(0x05, 0x00)
+
+    private fun bytes(vararg v: Int) = ByteArray(v.size) { v[it].toByte() }
+
+    private fun tlv(tag: Int, content: ByteArray): ByteArray {
+        val len = encLen(content.size)
+        val result = ByteArray(1 + len.size + content.size)
+        result[0] = tag.toByte()
+        len.copyInto(result, 1)
+        content.copyInto(result, 1 + len.size)
+        return result
+    }
+
+    private fun encLen(len: Int): ByteArray = when {
+        len < 0x80 -> byteArrayOf(len.toByte())
+        len < 0x100 -> byteArrayOf(0x81.toByte(), len.toByte())
+        len < 0x10000 -> byteArrayOf(0x82.toByte(), (len shr 8).toByte(), len.toByte())
+        else -> byteArrayOf(0x83.toByte(), (len shr 16).toByte(), (len shr 8).toByte(), len.toByte())
+    }
+
+    private fun cat(vararg parts: ByteArray): ByteArray {
+        val total = parts.sumOf { it.size }
+        val r = ByteArray(total)
+        var off = 0
+        for (p in parts) { p.copyInto(r, off); off += p.size }
+        return r
+    }
+
+    private fun seq(vararg parts: ByteArray): ByteArray = tlv(0x30, cat(*parts))
+    private fun set(vararg parts: ByteArray): ByteArray = tlv(0x31, cat(*parts))
+    private fun int(v: ByteArray): ByteArray {
+        val padded = if (v.isNotEmpty() && v[0] < 0) byteArrayOf(0) + v else v
+        return tlv(0x02, padded)
+    }
+    private fun oid(v: ByteArray): ByteArray = tlv(0x06, v)
+    private fun oct(v: ByteArray): ByteArray = tlv(0x04, v)
+    private fun utf8(s: String): ByteArray = tlv(0x0C, s.toByteArray(Charsets.UTF_8))
+    private fun bitStr(v: ByteArray): ByteArray = tlv(0x03, byteArrayOf(0) + v)
+    private fun ctx(tag: Int, data: ByteArray): ByteArray = tlv(0xA0 + tag, data)
+
+    private fun utcTime(d: Date): ByteArray {
+        val fmt = SimpleDateFormat("yyMMddHHmmss'Z'", Locale.US)
+        fmt.timeZone = TimeZone.getTimeZone("UTC")
+        return tlv(0x17, fmt.format(d).toByteArray(Charsets.US_ASCII))
     }
 }
