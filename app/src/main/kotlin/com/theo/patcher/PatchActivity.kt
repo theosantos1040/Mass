@@ -2,6 +2,7 @@ package com.theo.patcher
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -17,6 +18,7 @@ import com.theo.patcher.scanner.AdDetector
 import com.theo.patcher.scanner.IAPDetector
 import com.theo.patcher.scanner.LicenseDetector
 import com.theo.patcher.scanner.ProtectionDetector
+import com.theo.patcher.util.RootUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -46,6 +48,7 @@ class PatchActivity : AppCompatActivity() {
     private var outputApk: File? = null
     private lateinit var appInfo: AppInfo
     private var pkg = ""
+    private var pendingInstall = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +117,18 @@ class PatchActivity : AppCompatActivity() {
         btnPatch.setOnClickListener { startPatch() }
         btnInstall.setOnClickListener { installOutput() }
         btnUninstall.setOnClickListener { uninstallOriginal() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingInstall && !isPackageInstalled(pkg)) {
+            pendingInstall = false
+            appendLog("✓ Original desinstalado.")
+            val apk = outputApk ?: return
+            appendLog("Instalando patcheado...")
+            installViaIntent(apk)
+        }
+        btnUninstall.visibility = if (isPackageInstalled(pkg)) View.VISIBLE else View.GONE
     }
 
     private fun updateScanUI(app: AppInfo) {
@@ -191,10 +206,49 @@ class PatchActivity : AppCompatActivity() {
 
             if (result.success && result.outputApk != null) {
                 outputApk = result.outputApk
-                btnInstall.visibility = View.VISIBLE
-                appendLog("\nPatch concluido!")
+                appendLog("\nPatch concluido! Instalando...")
+                autoInstall()
             } else {
                 appendLog("\nFalha: ${result.error}")
+            }
+        }
+    }
+
+    private fun autoInstall() {
+        val apk = outputApk ?: return
+
+        lifecycleScope.launch {
+            val rooted = withContext(Dispatchers.IO) { RootUtil.isRooted() }
+
+            if (rooted) {
+                appendLog("\n[ROOT] Desinstalando original...")
+                val uninstall = withContext(Dispatchers.IO) {
+                    RootUtil.exec("pm uninstall $pkg")
+                }
+                appendLog(if (uninstall.success) "  ✓ Desinstalado" else "  ~ Nao estava instalado")
+
+                appendLog("[ROOT] Instalando patcheado...")
+                val install = withContext(Dispatchers.IO) {
+                    RootUtil.exec("pm install -r -d \"${apk.absolutePath}\"")
+                }
+                if (install.success) {
+                    appendLog("✓ Instalado com sucesso!")
+                    btnInstall.visibility = View.GONE
+                    btnUninstall.visibility = View.GONE
+                    return@launch
+                }
+                appendLog("Root install falhou: ${install.output}")
+                appendLog("Tentando via intent...")
+            }
+
+            if (isPackageInstalled(pkg)) {
+                appendLog("\n⚠ Desinstale o app original primeiro")
+                pendingInstall = true
+                btnUninstall.visibility = View.VISIBLE
+                btnInstall.visibility = View.VISIBLE
+                uninstallOriginal()
+            } else {
+                installViaIntent(apk)
             }
         }
     }
@@ -206,19 +260,45 @@ class PatchActivity : AppCompatActivity() {
 
     private fun installOutput() {
         val apk = outputApk ?: return
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (isPackageInstalled(pkg)) {
+            appendLog("⚠ Desinstale o original antes!")
+            pendingInstall = true
+            uninstallOriginal()
+            return
         }
-        startActivity(intent)
+        installViaIntent(apk)
+    }
+
+    private fun installViaIntent(apk: File) {
+        try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", apk)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            appendLog("Erro ao instalar: ${e.message}")
+            appendLog("APK salvo em: ${apk.absolutePath}")
+        }
     }
 
     private fun uninstallOriginal() {
-        startActivity(Intent(Intent.ACTION_DELETE).apply {
-            data = Uri.parse("package:$pkg")
-        })
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                startActivity(Intent(Intent.ACTION_DELETE).apply {
+                    data = Uri.parse("package:$pkg")
+                })
+            } else {
+                startActivity(Intent(Intent.ACTION_UNINSTALL_PACKAGE).apply {
+                    data = Uri.parse("package:$pkg")
+                })
+            }
+        } catch (e: Exception) {
+            appendLog("Erro ao desinstalar: ${e.message}")
+        }
     }
 
     private fun isPackageInstalled(pkg: String): Boolean = try {
