@@ -36,7 +36,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.4 — Diagnostic Signing")
+        emit("  THEO PATCHER v0.5 — apksig (Google lib)")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
