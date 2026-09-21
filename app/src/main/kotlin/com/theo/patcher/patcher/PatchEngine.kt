@@ -20,7 +20,9 @@ object PatchEngine {
         val patchLicense: Boolean = true,
         val patchProtection: Boolean = true,
         val patchBilling: Boolean = true
-    )
+    ) {
+        val anyPatch: Boolean get() = patchIAP || patchAds || patchLicense || patchProtection || patchBilling
+    }
 
     suspend fun patch(
         context: Context,
@@ -34,7 +36,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.3 — Aligned Signing")
+        emit("  THEO PATCHER v0.4 — Diagnostic Signing")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -144,18 +146,22 @@ object PatchEngine {
                     }
                 }
 
-                emit("\n[7/8] Patching AndroidManifest.xml...")
-                val manifestEntry = zip.getEntry("AndroidManifest.xml")
-                if (manifestEntry != null) {
-                    val original = zip.getInputStream(manifestEntry).readBytes()
-                    val patched = ManifestPatcher.patch(
-                        original,
-                        removeAds = options.patchAds,
-                        removeLicense = options.patchLicense
-                    )
-                    patchedEntries += ApkBuilder.PatchedEntry("AndroidManifest.xml", patched)
-                    emit("  + Manifest patchado")
-                    appliedStrategies += "Manifest"
+                if (options.patchAds || options.patchLicense) {
+                    emit("\n[7/8] Patching AndroidManifest.xml...")
+                    val manifestEntry = zip.getEntry("AndroidManifest.xml")
+                    if (manifestEntry != null) {
+                        val original = zip.getInputStream(manifestEntry).readBytes()
+                        val patched = ManifestPatcher.patch(
+                            original,
+                            removeAds = options.patchAds,
+                            removeLicense = options.patchLicense
+                        )
+                        patchedEntries += ApkBuilder.PatchedEntry("AndroidManifest.xml", patched)
+                        emit("  + Manifest patchado")
+                        appliedStrategies += "Manifest"
+                    }
+                } else {
+                    emit("\n[7/8] Manifest: skip (todos os patches desativados)")
                 }
             }
 
@@ -166,12 +172,13 @@ object PatchEngine {
             appliedStrategies += "Rebuild"
 
             val signedApk = try {
-                val s = ApkSigner.sign(rebuiltApk, context)
+                val s = ApkSigner.sign(rebuiltApk, context) { line -> emit(line) }
                 emit("  + Assinado: ${s.name}")
                 appliedStrategies += "Sign"
                 s
             } catch (e: Exception) {
-                emit("  ! Assinatura falhou: ${e.message}")
+                emit("  ! Assinatura falhou: ${e.javaClass.simpleName}: ${e.message}")
+                e.stackTrace.take(3).forEach { emit("    at $it") }
                 rebuiltApk
             }
 

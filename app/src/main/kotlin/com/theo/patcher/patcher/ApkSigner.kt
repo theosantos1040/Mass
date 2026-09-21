@@ -19,16 +19,98 @@ import java.util.zip.*
 
 object ApkSigner {
 
-    fun sign(unsignedApk: File, context: Context): File {
+    fun sign(unsignedApk: File, context: Context, log: (String) -> Unit = {}): File {
         val mat = getOrCreateSigningMaterial(context)
         val signedApk = File(unsignedApk.parent, "signed_${unsignedApk.name}")
         v1Sign(unsignedApk, signedApk, mat)
+        log("  + v1: ${signedApk.length() / 1024} KB")
+
+        // Self-verify v1 by re-parsing our own cert
+        try {
+            val vf = CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(mat.certDer))
+            (vf as X509Certificate).checkValidity()
+        } catch (e: Exception) {
+            log("  ! cert self-check failed: ${e.message}")
+        }
+
         try {
             v2Sign(signedApk, mat)
-        } catch (_: Exception) {
-            // v2 failed — v1-signed APK is still valid for older devices
+            log("  + v2 block added")
+        } catch (e: Exception) {
+            log("  ! v2 FAIL: ${e.javaClass.simpleName}: ${e.message}")
         }
+
+        // Post-sign verification: check STORED entries alignment
+        try {
+            val misaligned = verifyAlignment(signedApk)
+            if (misaligned.isNotEmpty()) {
+                log("  ! MISALIGNED: ${misaligned.joinToString(",")}")
+            } else {
+                log("  + alignment OK")
+            }
+        } catch (e: Exception) {
+            log("  ! alignment check failed: ${e.message}")
+        }
+
         return signedApk
+    }
+
+    /** Returns names of STORED entries whose file-data offset is not 4-byte aligned. */
+    private fun verifyAlignment(apk: File): List<String> {
+        val misaligned = mutableListOf<String>()
+        val raf = RandomAccessFile(apk, "r")
+        try {
+            // Find EOCD, read CD offset
+            val fileSize = raf.length().toInt()
+            val searchStart = maxOf(0, fileSize - 65557)
+            val buf = ByteArray(fileSize - searchStart)
+            raf.seek(searchStart.toLong())
+            raf.readFully(buf)
+            var eocd = -1
+            for (i in buf.size - 22 downTo 0) {
+                if (buf[i] == 0x50.toByte() && buf[i + 1] == 0x4b.toByte() &&
+                    buf[i + 2] == 0x05.toByte() && buf[i + 3] == 0x06.toByte()) { eocd = searchStart + i; break }
+            }
+            if (eocd < 0) return misaligned
+            raf.seek(eocd.toLong() + 16)
+            var cdOff = readUint32Le(raf).toLong()
+            raf.seek(eocd.toLong() + 10)
+            val entryCountBytes = ByteArray(2)
+            raf.readFully(entryCountBytes)
+            val entryCount = (entryCountBytes[0].toInt() and 0xFF) or ((entryCountBytes[1].toInt() and 0xFF) shl 8)
+
+            for (i in 0 until entryCount) {
+                raf.seek(cdOff)
+                val cdEntry = ByteArray(46)
+                raf.readFully(cdEntry)
+                if (cdEntry[0] != 0x50.toByte() || cdEntry[1] != 0x4b.toByte()) break
+                val method = ((cdEntry[10].toInt() and 0xFF) or ((cdEntry[11].toInt() and 0xFF) shl 8))
+                val nameLen = ((cdEntry[28].toInt() and 0xFF) or ((cdEntry[29].toInt() and 0xFF) shl 8))
+                val extraLen = ((cdEntry[30].toInt() and 0xFF) or ((cdEntry[31].toInt() and 0xFF) shl 8))
+                val commentLen = ((cdEntry[32].toInt() and 0xFF) or ((cdEntry[33].toInt() and 0xFF) shl 8))
+                val localOff = (cdEntry[42].toInt() and 0xFF).toLong() or
+                               ((cdEntry[43].toInt() and 0xFF).toLong() shl 8) or
+                               ((cdEntry[44].toInt() and 0xFF).toLong() shl 16) or
+                               ((cdEntry[45].toInt() and 0xFF).toLong() shl 24)
+                val nameBytes = ByteArray(nameLen)
+                raf.readFully(nameBytes)
+                val name = String(nameBytes, Charsets.UTF_8)
+                cdOff += 46 + nameLen + extraLen + commentLen
+
+                if (method == 0) {  // STORED
+                    // Read local header at localOff to get local extra length
+                    raf.seek(localOff + 28)
+                    val locExtra = ByteArray(2)
+                    raf.readFully(locExtra)
+                    val locExtraLen = ((locExtra[0].toInt() and 0xFF) or ((locExtra[1].toInt() and 0xFF) shl 8))
+                    val dataOffset = localOff + 30 + nameLen + locExtraLen
+                    if (dataOffset % 4 != 0L) misaligned += name
+                }
+            }
+        } finally {
+            raf.close()
+        }
+        return misaligned
     }
 
     private class SigningMaterial(
