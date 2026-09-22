@@ -58,9 +58,11 @@ object PatchEngine {
         val patchIAP: Boolean = false,
         val patchAds: Boolean = false,
         val patchLicense: Boolean = false,
-        val patchProtection: Boolean = false,
-        // Byte-search DEX patching corrupts the classes.dex and crashes the app
-        // on launch. Off by default until replaced with a real DEX parser.
+        // Signature/anti-tamper bypass via dexlib2 (correct, non-corrupting).
+        // On by default: re-signed apps that self-check their signature need it
+        // to run at all.
+        val patchProtection: Boolean = true,
+        // Legacy byte-search DEX patchers corrupt the app; off until ported to dexlib2.
         val patchBilling: Boolean = false
     ) {
         val anyPatch: Boolean get() = patchIAP || patchAds || patchLicense || patchProtection || patchBilling
@@ -78,7 +80,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v1.1 — resign limpo")
+        emit("  THEO PATCHER v1.2 — dexlib2 sig-bypass")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -200,14 +202,21 @@ object PatchEngine {
                         }
                     }
 
-                    if (options.patchProtection && protections.isNotEmpty()) {
-                        emit("\n[6/8] Patching DEX - bypass de protecao (${entry.name})...")
-                        tryPatch("Protection") {
-                            val (p, r) = ProtectionPatcher.patch(it)
-                            if (r.bytesModified > 0) {
-                                emit("  + ${entry.name} Protection: ${r.patchedMethods.size} metodo(s)")
-                                p to r.bytesModified
-                            } else { emit("  ~ ${entry.name}: sem protecoes patchaveis"); null }
+                    if (options.patchProtection) {
+                        emit("\n[6/8] DEX - bypass de assinatura/tamper via dexlib2 (${entry.name})...")
+                        try {
+                            val (p, r) = DexRewriter.bypassSignatureChecks(dexBytes, workDir)
+                            if (r.count > 0) {
+                                dexBytes = p
+                                totalPatched += r.count
+                                emit("  + ${entry.name}: ${r.count} check(s) de assinatura neutralizado(s)")
+                                r.patched.take(8).forEach { emit("    - $it") }
+                                appliedStrategies += "SigBypass:${entry.name}"
+                            } else {
+                                emit("  ~ ${entry.name}: nenhum check de assinatura encontrado")
+                            }
+                        } catch (e: Exception) {
+                            emit("  ! ${entry.name}: dexlib2 falhou: ${e.javaClass.simpleName}: ${e.message}")
                         }
                     }
 

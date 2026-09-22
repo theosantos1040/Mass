@@ -224,7 +224,8 @@ class PatchActivity : AppCompatActivity() {
             patchIAP = cbIAP.isChecked,
             patchAds = cbAds.isChecked,
             patchLicense = cbLicense.isChecked,
-            patchProtection = cbProtection.isChecked
+            // Signature/tamper bypass always runs so re-signed apps can launch.
+            patchProtection = true
         )
 
         lifecycleScope.launch {
