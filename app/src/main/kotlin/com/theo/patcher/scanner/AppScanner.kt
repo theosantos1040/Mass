@@ -20,7 +20,7 @@ object AppScanner {
                         packageName = pkg.packageName,
                         appName = pm.getApplicationLabel(pkg).toString(),
                         icon = pm.getApplicationIcon(pkg),
-                        apkPath = pkg.sourceDir,
+                        apkPath = pkg.publicSourceDir ?: pkg.sourceDir,
                         splitApkPaths = pkg.splitSourceDirs?.toList() ?: emptyList(),
                         versionName = runCatching {
                             pm.getPackageInfo(pkg.packageName, 0).versionName ?: "?"

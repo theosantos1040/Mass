@@ -14,6 +14,46 @@ import java.util.zip.ZipFile
 
 object PatchEngine {
 
+    /**
+     * Copy an installed-app APK into our cache. Direct File access to
+     * /data/app is blocked on modern Android for third-party apps, so we try
+     * several strategies and report exactly what fails.
+     */
+    private fun copyToCache(src: File, dest: File, emit: (String) -> Unit): File? {
+        emit("    existe=${runCatching { src.exists() }.getOrDefault(false)} " +
+             "le=${runCatching { src.canRead() }.getOrDefault(false)} " +
+             "tam=${runCatching { src.length() }.getOrDefault(0L)}")
+
+        // Strategy 1: plain stream copy (works when the file is world-readable)
+        try {
+            src.inputStream().use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            if (dest.length() > 0) {
+                emit("    → copiado (stream): ${dest.length() / 1024} KB")
+                return dest
+            }
+        } catch (e: Exception) {
+            emit("    ! stream falhou: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        // Strategy 2: NIO copy (different syscall path, sometimes succeeds)
+        try {
+            java.nio.file.Files.copy(
+                src.toPath(), dest.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+            )
+            if (dest.length() > 0) {
+                emit("    → copiado (nio): ${dest.length() / 1024} KB")
+                return dest
+            }
+        } catch (e: Exception) {
+            emit("    ! nio falhou: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        return null
+    }
+
     data class PatchOptions(
         val patchIAP: Boolean = true,
         val patchAds: Boolean = true,
@@ -36,30 +76,42 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.8 — install diagnostics")
+        emit("  THEO PATCHER v0.9 — leitura via cache")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
         emit("Opcoes: IAP=${options.patchIAP} Ads=${options.patchAds} License=${options.patchLicense} Protection=${options.patchProtection} Billing=${options.patchBilling}")
 
         try {
-            val sourceApk = File(app.apkPath)
             val workDir = File(context.cacheDir, "theo_work_${app.packageName}").also {
                 it.deleteRecursively(); it.mkdirs()
             }
 
-            // Split APKs from PackageManager (splitSourceDirs) — the only reliable way
-            // on Android 11+; listFiles() on /data/app/ is blocked by scoped storage.
-            // Fall back to sibling files for user-picked APKs.
-            val splits = (app.splitApkPaths.map { File(it) }.filter { it.exists() }.takeIf { it.isNotEmpty() }
-                ?: sourceApk.parentFile?.listFiles { f ->
-                    f.name.startsWith("split_") && f.name.endsWith(".apk")
-                }?.toList() ?: emptyList())
+            // We CANNOT operate on /data/app/.../base.apk directly — on Android 13+
+            // (and hardened OEMs like Samsung) the sandbox/SELinux blocks reading
+            // another package's APK by path. Resolve fresh from PackageManager and
+            // copy everything into our own cache, where we have full access.
+            emit("\n[0/8] Preparando fonte (copiando pra cache)...")
+            val pm = context.packageManager
+            val ai = runCatching { pm.getApplicationInfo(app.packageName, 0) }.getOrNull()
+            val basePath = ai?.publicSourceDir ?: ai?.sourceDir ?: app.apkPath
+            val splitPaths = (ai?.splitSourceDirs?.toList()
+                ?: app.splitApkPaths).filter { it.isNotEmpty() }
+
+            emit("  base: $basePath")
+            val sourceApk = copyToCache(File(basePath), File(workDir, "base.apk"), ::emit)
+                ?: throw RuntimeException(
+                    "Nao consigo ler o APK instalado (bloqueio do Android/Samsung). " +
+                    "Baixe o APK do app (ex: APKPure/APKMirror) e use 'Escolher APK' em vez da lista de apps."
+                )
+
+            val splits = splitPaths.mapIndexedNotNull { i, p ->
+                emit("  split[$i]: $p")
+                copyToCache(File(p), File(workDir, "split_$i.apk"), ::emit)
+            }
 
             if (splits.isNotEmpty()) {
-                emit("⚠ Split APK detectado: ${splits.size} splits além do base")
-                splits.forEach { emit("    - ${it.name} (${it.length() / 1024} KB)") }
-                emit("  → Instalação via session (PackageInstaller)")
+                emit("⚠ Split APK: ${splits.size} splits copiados")
             } else {
                 emit("APK único (sem splits)")
             }
