@@ -28,9 +28,10 @@ import java.io.File
 class PatchActivity : AppCompatActivity() {
 
     companion object {
-        const val EXTRA_PACKAGE  = "pkg"
-        const val EXTRA_APP_NAME = "name"
-        const val EXTRA_APK_PATH = "apk"
+        const val EXTRA_PACKAGE     = "pkg"
+        const val EXTRA_APP_NAME    = "name"
+        const val EXTRA_APK_PATH    = "apk"
+        const val EXTRA_SPLIT_PATHS = "splits"
     }
 
     private lateinit var tvAppName: TextView
@@ -72,6 +73,7 @@ class PatchActivity : AppCompatActivity() {
         pkg = intent.getStringExtra(EXTRA_PACKAGE) ?: return finish()
         val name    = intent.getStringExtra(EXTRA_APP_NAME) ?: pkg
         val apkPath = intent.getStringExtra(EXTRA_APK_PATH) ?: return finish()
+        val splitPaths = intent.getStringArrayListExtra(EXTRA_SPLIT_PATHS) ?: arrayListOf()
 
         tvAppName.text = name
         btnInstall.visibility = View.GONE
@@ -82,6 +84,7 @@ class PatchActivity : AppCompatActivity() {
             appName = name,
             icon = null,
             apkPath = apkPath,
+            splitApkPaths = splitPaths,
             versionName = "?",
             apkSize = File(apkPath).length()
         )

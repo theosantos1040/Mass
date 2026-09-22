@@ -36,7 +36,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.6 — apksig + split install")
+        emit("  THEO PATCHER v0.7 — split via PackageManager")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -48,14 +48,20 @@ object PatchEngine {
                 it.deleteRecursively(); it.mkdirs()
             }
 
-            val splits = sourceApk.parentFile?.listFiles { f ->
-                f.name.startsWith("split_") && f.name.endsWith(".apk")
-            }?.toList() ?: emptyList()
+            // Split APKs from PackageManager (splitSourceDirs) — the only reliable way
+            // on Android 11+; listFiles() on /data/app/ is blocked by scoped storage.
+            // Fall back to sibling files for user-picked APKs.
+            val splits = (app.splitApkPaths.map { File(it) }.filter { it.exists() }.takeIf { it.isNotEmpty() }
+                ?: sourceApk.parentFile?.listFiles { f ->
+                    f.name.startsWith("split_") && f.name.endsWith(".apk")
+                }?.toList() ?: emptyList())
 
             if (splits.isNotEmpty()) {
                 emit("⚠ Split APK detectado: ${splits.size} splits além do base")
-                splits.forEach { emit("    - ${it.name}") }
+                splits.forEach { emit("    - ${it.name} (${it.length() / 1024} KB)") }
                 emit("  → Instalação via session (PackageInstaller)")
+            } else {
+                emit("APK único (sem splits)")
             }
 
             emit("\n[1/8] Escaneando padroes...")
@@ -204,13 +210,32 @@ object PatchEngine {
             val outputApk = File(outputDir, "${app.packageName}_patched.apk")
             signedApk.copyTo(outputApk, overwrite = true)
 
+            // Re-sign each split with the SAME key as base — session install requires
+            // matching signatures across all APKs in the session.
+            val signedSplits = mutableListOf<File>()
+            if (splits.isNotEmpty()) {
+                emit("\nRe-assinando ${splits.size} splits com a mesma chave...")
+                for (split in splits) {
+                    try {
+                        val signed = ApkSigner.sign(split, context) { }
+                        val out = File(outputDir, "${app.packageName}_${split.name}")
+                        signed.copyTo(out, overwrite = true)
+                        signedSplits += out
+                        emit("  + ${split.name}: ${out.length() / 1024} KB")
+                    } catch (e: Exception) {
+                        emit("  ! ${split.name} falhou: ${e.message}")
+                    }
+                }
+            }
+
             emit("\n======================================")
             emit("  PATCH CONCLUIDO COM SUCESSO!")
             emit("======================================")
             emit("Output: ${outputApk.absolutePath}")
+            if (signedSplits.isNotEmpty()) emit("Splits: ${signedSplits.size} re-assinados")
             emit("Estrategias: ${appliedStrategies.joinToString(", ")}")
 
-            PatchResult(true, outputApk, appliedStrategies, log.toString(), splitApks = splits)
+            PatchResult(true, outputApk, appliedStrategies, log.toString(), splitApks = signedSplits)
 
         } catch (e: Exception) {
             emit("\n[ERRO] ${e.javaClass.simpleName}: ${e.message}")

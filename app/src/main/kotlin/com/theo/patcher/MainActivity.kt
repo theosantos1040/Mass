@@ -133,6 +133,7 @@ class MainActivity : AppCompatActivity() {
             putExtra(PatchActivity.EXTRA_PACKAGE, app.packageName)
             putExtra(PatchActivity.EXTRA_APP_NAME, app.appName)
             putExtra(PatchActivity.EXTRA_APK_PATH, app.apkPath)
+            putStringArrayListExtra(PatchActivity.EXTRA_SPLIT_PATHS, ArrayList(app.splitApkPaths))
         }
         startActivity(intent)
     }

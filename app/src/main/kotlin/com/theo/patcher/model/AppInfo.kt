@@ -7,6 +7,7 @@ data class AppInfo(
     val appName: String,
     val icon: Drawable?,
     val apkPath: String,
+    val splitApkPaths: List<String> = emptyList(),
     val versionName: String,
     val apkSize: Long,
     var iapStatus: IAPStatus = IAPStatus.UNKNOWN,
