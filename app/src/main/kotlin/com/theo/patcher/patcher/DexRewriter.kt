@@ -139,7 +139,7 @@ object DexRewriter {
         )
         return ImmutableMethod(
             m.definingClass, m.name, m.parameters, m.returnType,
-            m.accessFlags, m.annotations, impl
+            m.accessFlags, m.annotations, m.hiddenApiRestrictions, impl
         )
     }
 
@@ -151,7 +151,7 @@ object DexRewriter {
         )
         return ImmutableMethod(
             m.definingClass, m.name, m.parameters, m.returnType,
-            m.accessFlags, m.annotations, impl
+            m.accessFlags, m.annotations, m.hiddenApiRestrictions, impl
         )
     }
 }
