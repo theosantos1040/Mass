@@ -76,7 +76,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v0.9 — leitura via cache")
+        emit("  THEO PATCHER v1.0 — BC fix + verify")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
@@ -252,9 +252,10 @@ object PatchEngine {
                 appliedStrategies += "Sign"
                 s
             } catch (e: Exception) {
-                emit("  ! Assinatura falhou: ${e.javaClass.simpleName}: ${e.message}")
-                e.stackTrace.take(3).forEach { emit("    at $it") }
-                rebuiltApk
+                // NEVER install unsigned — that produces INSTALL_PARSE_FAILED_NO_CERTIFICATES.
+                emit("  ! ASSINATURA FALHOU (abortando): ${e.javaClass.simpleName}: ${e.message}")
+                e.stackTrace.take(6).forEach { emit("    at $it") }
+                throw e
             }
 
             val outputDir = File(context.getExternalFilesDir(null), "theo_patched")
