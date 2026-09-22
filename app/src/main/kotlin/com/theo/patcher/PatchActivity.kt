@@ -18,6 +18,8 @@ import com.theo.patcher.scanner.AdDetector
 import com.theo.patcher.scanner.IAPDetector
 import com.theo.patcher.scanner.LicenseDetector
 import com.theo.patcher.scanner.ProtectionDetector
+import android.content.pm.PackageInstaller
+import com.theo.patcher.util.InstallReceiver
 import com.theo.patcher.util.RootUtil
 import com.theo.patcher.util.SessionInstaller
 import kotlinx.coroutines.Dispatchers
@@ -69,6 +71,28 @@ class PatchActivity : AppCompatActivity() {
         tvLog        = findViewById(R.id.tvLog)
         scrollLog    = findViewById(R.id.scrollLog)
         progressBar  = findViewById(R.id.progressBar)
+
+        tvLog.setTextIsSelectable(true)
+
+        // Surface the raw PackageInstaller result on screen so the exact
+        // INSTALL_FAILED_* reason is visible (and copyable) for diagnosis.
+        InstallReceiver.onResult = { status, message ->
+            runOnUiThread {
+                appendLog("\n========== RESULTADO DO INSTALL ==========")
+                when (status) {
+                    PackageInstaller.STATUS_SUCCESS ->
+                        appendLog("✓ INSTALADO COM SUCESSO!")
+                    PackageInstaller.STATUS_PENDING_USER_ACTION ->
+                        appendLog("Aguardando você confirmar no instalador do sistema...")
+                    else -> {
+                        appendLog("✗ FALHOU — status=$status")
+                        appendLog("MOTIVO: $message")
+                        appendLog("(segure o texto pra copiar e me mandar)")
+                    }
+                }
+                appendLog("==========================================")
+            }
+        }
 
         pkg = intent.getStringExtra(EXTRA_PACKAGE) ?: return finish()
         val name    = intent.getStringExtra(EXTRA_APP_NAME) ?: pkg
@@ -122,6 +146,11 @@ class PatchActivity : AppCompatActivity() {
         btnPatch.setOnClickListener { startPatch() }
         btnInstall.setOnClickListener { installOutput() }
         btnUninstall.setOnClickListener { uninstallOriginal() }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        InstallReceiver.onResult = null
     }
 
     override fun onResume() {
@@ -260,16 +289,15 @@ class PatchActivity : AppCompatActivity() {
     }
 
     private fun installBest(apk: File) {
-        if (splitApks.isNotEmpty()) {
-            appendLog("\nInstalando split APK (${splitApks.size + 1} apks)...")
-            try {
-                SessionInstaller.install(this, apk, splitApks) { line -> appendLog(line) }
-            } catch (e: Exception) {
-                appendLog("Session install falhou: ${e.message}")
-                appendLog("Fallback para intent install (só base.apk)...")
-                installViaIntent(apk)
-            }
-        } else {
+        // Always use session install — it returns the exact INSTALL_FAILED_* reason
+        // via InstallReceiver, and it is the only correct path for split apps.
+        val count = splitApks.size + 1
+        appendLog("\nInstalando via session ($count apk${if (count > 1) "s" else ""})...")
+        try {
+            SessionInstaller.install(this, apk, splitApks) { line -> appendLog(line) }
+        } catch (e: Exception) {
+            appendLog("Session install falhou: ${e.javaClass.simpleName}: ${e.message}")
+            appendLog("Fallback para intent install...")
             installViaIntent(apk)
         }
     }

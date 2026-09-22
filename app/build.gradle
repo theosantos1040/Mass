@@ -11,8 +11,8 @@ android {
         applicationId "com.theo.patcher"
         minSdk 26
         targetSdk 34
-        versionCode 7
-        versionName "0.7-splitPM"
+        versionCode 8
+        versionName "0.8-diag"
         manifestPlaceholders = [:]
         multiDexEnabled true
     }
