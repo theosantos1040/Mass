@@ -27,8 +27,8 @@ object DexRewriter {
 
     data class Report(val patched: List<String>, val count: Int)
 
-    // Instruction/reference markers that identify a runtime signature/integrity check.
-    private val SIG_MARKERS = listOf(
+    // Direct signature APIs — strong signal on their own.
+    private val DIRECT_SIG = listOf(
         "getPackageInfo",
         "Landroid/content/pm/Signature",
         "signingInfo",
@@ -37,7 +37,19 @@ object DexRewriter {
         "GET_SIGNATURES",
         "GET_SIGNING_CERTIFICATES",
         ";->signatures",
-        "PackageManager;->checkSignatures"
+        "checkSignatures"
+    )
+
+    // Self-integrity: reads its own APK path/bytes …
+    private val SELF_PATH = listOf(
+        "getPackageCodePath", "->publicSourceDir", "->sourceDir",
+        "getInstallerPackageName", "getInstallSourceInfo"
+    )
+
+    // … and hashes/opens it — the two together are a self-CRC integrity check.
+    private val HASH = listOf(
+        "java/util/zip/CRC32", "java/util/zip/Adler32",
+        "java/security/MessageDigest", "java/util/zip/ZipFile", "java/util/zip/ZipEntry"
     )
 
     /**
@@ -92,27 +104,38 @@ object DexRewriter {
         }
     }
 
-    /** Returns a replacement method if [m] is a signature check, else null. */
+    /** Returns a replacement method if [m] looks like an integrity/signature check. */
     private fun maybeForce(m: Method): Method? {
         val impl = m.implementation ?: return null
         if (m.accessFlags and (AccessFlags.NATIVE.value or AccessFlags.ABSTRACT.value) != 0) return null
 
-        var refsSig = false
+        var direct = false
+        var selfPath = false
+        var hash = false
         var hasThrow = false
         for (inst in impl.instructions) {
             if (inst.opcode == Opcode.THROW) hasThrow = true
             val refInst = inst as? ReferenceInstruction ?: continue
             val ref = runCatching { ReferenceUtil.getReferenceString(refInst.reference) }
                 .getOrNull() ?: continue
-            if (SIG_MARKERS.any { ref.contains(it) }) { refsSig = true }
+            if (DIRECT_SIG.any { ref.contains(it) }) direct = true
+            if (SELF_PATH.any { ref.contains(it) }) selfPath = true
+            if (HASH.any { ref.contains(it) }) hash = true
         }
-        if (!refsSig) return null
+
+        val inLicensing = m.definingClass.contains("licensing", ignoreCase = true) ||
+            m.definingClass.contains("LicenseChecker") ||
+            m.definingClass.contains("Verifier")
+
+        // A check if: direct signature API, OR self-APK read+hash, OR a licensing class.
+        val isCheck = direct || (selfPath && hash) || inLicensing
+        if (!isCheck) return null
 
         val rt = m.returnType
         return when {
             rt == "Z" || rt == "I" || rt == "B" || rt == "S" || rt == "C" ->
                 forceReturnConst(m, 1)
-            rt == "V" && hasThrow ->
+            rt == "V" && (hasThrow || direct || inLicensing) ->
                 forceReturnVoid(m)
             else -> null
         }

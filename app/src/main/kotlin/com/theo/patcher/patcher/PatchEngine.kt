@@ -80,7 +80,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v1.2 — dexlib2 sig-bypass")
+        emit("  THEO PATCHER v1.3 — sig-bypass ampliado")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
