@@ -55,11 +55,13 @@ object PatchEngine {
     }
 
     data class PatchOptions(
-        val patchIAP: Boolean = true,
-        val patchAds: Boolean = true,
-        val patchLicense: Boolean = true,
-        val patchProtection: Boolean = true,
-        val patchBilling: Boolean = true
+        val patchIAP: Boolean = false,
+        val patchAds: Boolean = false,
+        val patchLicense: Boolean = false,
+        val patchProtection: Boolean = false,
+        // Byte-search DEX patching corrupts the classes.dex and crashes the app
+        // on launch. Off by default until replaced with a real DEX parser.
+        val patchBilling: Boolean = false
     ) {
         val anyPatch: Boolean get() = patchIAP || patchAds || patchLicense || patchProtection || patchBilling
     }
@@ -76,7 +78,7 @@ object PatchEngine {
         fun emit(msg: String) { log.appendLine(msg); onLog(msg) }
 
         emit("======================================")
-        emit("  THEO PATCHER v1.0 — BC fix + verify")
+        emit("  THEO PATCHER v1.1 — resign limpo")
         emit("======================================")
         emit("Target: ${app.appName} (${app.packageName})")
         emit("APK: ${app.apkPath}")
