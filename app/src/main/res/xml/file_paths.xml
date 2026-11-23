@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <external-files-path name="theo_patched" path="theo_patched/" />
+    <cache-path name="theo_work" path="." />
+</paths>
