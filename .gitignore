@@ -1,0 +1,38 @@
+# Gradle
+.gradle/
+build/
+*.apk
+*.aar
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# Local configuration file
+local.properties
+
+# Kotlin
+out/
+*.class
+*.jar
+*.zip
+
+# IDE
+.vscode/
+.vim/
+*.swp
+*.swo
+*~
+
+# Dependencies
+.classpath
+.project
+.settings/
+bin/
+
+# Generated files
+gen/
+src/gen/
