@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg_dark">#1A1A1A</color>
+    <color name="bg_header">#111111</color>
+    <color name="bg_card">#242424</color>
+    <color name="divider">#333333</color>
+    <color name="text_primary">#E8E8E8</color>
+    <color name="text_secondary">#888888</color>
+    <color name="log_text">#00CC66</color>
+    <color name="accent_green">#00CC66</color>
+    <color name="badge_iap">#CC4400</color>
+    <color name="badge_patched">#006633</color>
+    <color name="badge_no_iap">#444444</color>
+    <color name="colorPrimary">#111111</color>
+    <color name="colorPrimaryDark">#000000</color>
+    <color name="colorAccent">#00CC66</color>
+</resources>
